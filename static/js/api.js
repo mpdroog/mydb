@@ -13,11 +13,24 @@ const HEAD = {
   'Content-Type': 'application/json',
 };
 
+// ApiError carries the status and, when the server answered with JSON, the
+// object it sent. The confirm gate uses that: a statement held back for
+// confirmation comes back as 409 with the risk attached, which is a
+// question to put in a dialog rather than an error to toast.
 export class ApiError extends Error {
   constructor(status, body) {
-    super(body || ('HTTP ' + status));
+    let msg = body || ('HTTP ' + status);
+    let data = null;
+    if (body && body.startsWith('{')) {
+      try {
+        data = JSON.parse(body);
+        if (data.error) msg = data.error;
+      } catch { /* a plain-text body that happened to start with a brace */ }
+    }
+    super(msg);
     this.name = 'ApiError';
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -63,7 +76,14 @@ export const api = {
 
   alter: (r, signal) => req('POST', '/alter', r, signal),
   updateRow: (r, signal) => req('PATCH', '/row', r, signal),
+
+  kill: (r, signal) => req('POST', '/kill', r, signal),
+  split: (sql, signal) => req('POST', '/split', { sql }, signal),
+  qlog: (f, signal) => req('GET', '/qlog?' + qs(f), undefined, signal),
 };
+
+// dashPath is the SSE endpoint one server's dashboard reads.
+export const dashPath = (server) => '/dashboard/events?' + qs({ server });
 
 // stream reads an SSE endpoint, calling onEvent for each message. It
 // resolves when the server closes the stream and rejects on abort, so a

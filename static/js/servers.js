@@ -29,6 +29,7 @@ function form(entry, onSaved) {
     autocomplete: 'new-password',
   });
 
+  const production = h('input', { type: 'checkbox', checked: !!s.production });
   const useSSH = h('input', { type: 'checkbox', checked: !!s.ssh });
   const sshHost = h('input', { type: 'text', value: s.ssh?.host || '', placeholder: 'bastion.example.com:22' });
   const sshUser = h('input', { type: 'text', value: s.ssh?.user || '' });
@@ -68,6 +69,13 @@ function form(entry, onSaved) {
     field('MySQL user', user),
     field('MySQL password', pass),
     h('p', { class: 'note', text: 'With SSH on, the host is resolved from the SSH server (usually 127.0.0.1).' }),
+    field('Production', production),
+    h('p', {
+      class: 'note',
+      text: 'A production server is drawn in red everywhere it appears, and a '
+        + 'statement that changes data without a WHERE asks you to type the '
+        + 'server\'s name rather than click a button.',
+    }),
     field('Via SSH tunnel', useSSH),
     sshBox,
   );
@@ -101,6 +109,7 @@ function form(entry, onSaved) {
       port: Number(port.value) || 3306,
       user: user.value.trim(),
       pass: pass.value,
+      production: production.checked,
       ssh: useSSH.checked ? {
         host: sshHost.value.trim(),
         user: sshUser.value.trim(),

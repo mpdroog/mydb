@@ -89,6 +89,10 @@ type Server struct {
 	Pass string `toml:"pass,omitempty"`
 	TLS  string `toml:"tls,omitempty"`
 	Port int    `toml:"port,omitzero"`
+	// Production marks a server where a mistake is expensive. It changes
+	// nothing about how mydb connects; it colours the GUI red and makes a
+	// destructive statement ask for the server's name instead of a click.
+	Production bool `toml:"production,omitempty"`
 }
 
 // TLSNames are the accepted values of a server's tls setting.
@@ -143,6 +147,42 @@ type Timeout struct {
 	IdleReap     Duration `toml:"idle_reap,omitzero"`
 	HTTPReadHdr  Duration `toml:"http_read_hdr,omitzero"`
 	HTTPIdle     Duration `toml:"http_idle,omitzero"`
+	// DashPoll is how often an open dashboard asks the server what it is
+	// doing. Every open dashboard costs one round-trip per tick, so this is
+	// the knob to turn when watching a server over a slow tunnel.
+	DashPoll Duration `toml:"dashboard_poll,omitzero"`
+}
+
+// DefaultQueryLog is the file the query log is appended to when the
+// config-file does not name one. It lives next to config.toml because that
+// is where mydb's own state belongs, and it holds the literal values of
+// every statement, so it is written 0600 like the config-file itself.
+const DefaultQueryLog = "mydb-queries.jsonl"
+
+// Log configures the query log: every statement mydb runs, appended as one
+// JSON object per line so it can be searched from the GUI and with grep.
+type Log struct {
+	// Queries is the file to append to. A pointer so that "" can mean off
+	// rather than "unset, use the default".
+	Queries *string `toml:"queries,omitempty"`
+	// MaxSizeMB rotates the file once it grows past this.
+	MaxSizeMB int `toml:"max_size_mb,omitzero"`
+	// Keep is how many rotated generations to hold on to.
+	Keep int `toml:"keep,omitzero"`
+}
+
+// Path returns the file to append to, "" when the log is switched off.
+// A relative name is resolved next to the config-file rather than the
+// working directory, so mydb started from elsewhere still finds it.
+func (l Log) Path() string {
+	p := DefaultQueryLog
+	if l.Queries != nil {
+		p = *l.Queries
+	}
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(filepath.Dir(Path), p)
 }
 
 // DefaultSQLMode is the session sql_mode mydb connects with unless the
@@ -199,6 +239,7 @@ func (m MySQL) LockWaitSeconds() int {
 type Config struct {
 	Timeout *Timeout `toml:"timeout,omitempty"`
 	MySQL   *MySQL   `toml:"mysql,omitempty"`
+	Log     *Log     `toml:"log,omitempty"`
 	Listen  string   `toml:"listen,omitempty"`
 	Server  []Server `toml:"server"`
 }
@@ -215,7 +256,11 @@ func resolve(r Config) Config {
 	if r.MySQL != nil {
 		m = *r.MySQL
 	}
-	e.Timeout, e.MySQL = &t, &m
+	l := Log{}
+	if r.Log != nil {
+		l = *r.Log
+	}
+	e.Timeout, e.MySQL, e.Log = &t, &m, &l
 
 	e.Server = make([]Server, len(r.Server))
 	copy(e.Server, r.Server)
@@ -246,10 +291,18 @@ func (c *Config) defaults() {
 		{&t.IdleReap, 10 * time.Minute},
 		{&t.HTTPReadHdr, 5 * time.Second},
 		{&t.HTTPIdle, 60 * time.Second},
+		{&t.DashPoll, 3 * time.Second},
 	} {
 		if *d.p == 0 {
 			*d.p = Duration(d.def)
 		}
+	}
+
+	if c.Log.MaxSizeMB == 0 {
+		c.Log.MaxSizeMB = 32
+	}
+	if c.Log.Keep == 0 {
+		c.Log.Keep = 1
 	}
 }
 
@@ -291,6 +344,13 @@ func LockWait() int {
 	mu.RLock()
 	defer mu.RUnlock()
 	return c.MySQL.LockWaitSeconds()
+}
+
+// QueryLog returns the query-log settings with their defaults resolved.
+func QueryLog() Log {
+	mu.RLock()
+	defer mu.RUnlock()
+	return *c.Log
 }
 
 // Open reads the config-file, applies defaults and validates it.

@@ -23,6 +23,7 @@ import (
 	"github.com/mpdroog/mydb/connman"
 	"github.com/mpdroog/mydb/jobs"
 	"github.com/mpdroog/mydb/middleware"
+	"github.com/mpdroog/mydb/qlog"
 )
 
 //go:embed static
@@ -35,6 +36,10 @@ const writeDeadline = 90 * time.Second
 
 // shutdownGrace is how long in-flight requests get on Ctrl-C.
 const shutdownGrace = 5 * time.Second
+
+// buildRev is stamped in at link time by build-windows.sh. A binary that has
+// been sitting on a server for a month should be able to say what it is.
+var buildRev = "dev"
 
 func main() {
 	var configPath string
@@ -56,6 +61,16 @@ func main() {
 	addr := config.Listen()
 	if *listen != "" {
 		addr = *listen
+	}
+
+	// The query log is a convenience, not a dependency: if it cannot be
+	// opened mydb says so and runs without it rather than refusing to start
+	// over a file it only wanted to append to.
+	qc := config.QueryLog()
+	if e := qlog.Open(qc.Path(), qc.MaxSizeMB, qc.Keep); e != nil {
+		log.Printf("WARN main: query log disabled: %s", e)
+	} else if p := qlog.Path(); p != "" && config.Verbose {
+		log.Printf("main: query log %s", p)
 	}
 
 	cm := connman.New()
@@ -83,6 +98,11 @@ func main() {
 	router.GET("/api/v1/tables", a.Tables)
 	router.GET("/api/v1/structure", a.Structure)
 	router.GET("/api/v1/erm", a.ERM)
+
+	router.GET("/api/v1/dashboard/events", a.DashEvents)
+	router.POST("/api/v1/kill", a.Kill)
+	router.GET("/api/v1/qlog", a.QueryLog)
+	router.POST("/api/v1/split", a.Split)
 
 	router.POST("/api/v1/query", a.QuerySubmit)
 	router.GET("/api/v1/jobs/:id", a.JobResult)
@@ -120,7 +140,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("mydb listening on http://%s (config %s)", addr, config.Path)
+		log.Printf("mydb %s listening on http://%s (config %s)", buildRev, addr, config.Path)
 		if e := srv.ListenAndServe(); e != nil && e != http.ErrServerClosed {
 			log.Fatal(e)
 		}
@@ -136,6 +156,9 @@ func main() {
 	}
 	jm.Close()
 	cm.Close()
+	if e := qlog.Close(); e != nil {
+		log.Printf("main qlog.Close: %s", e)
+	}
 }
 
 // redirect sends / to the GUI. Pointing at the directory rather than

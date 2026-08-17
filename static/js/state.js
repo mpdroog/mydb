@@ -35,6 +35,12 @@ export function statusOf(name) {
   return servers.get(name)?.status?.state || 'offline';
 }
 
+// isProduction says whether this server is the kind where a mistake is
+// expensive. It drives the red chrome and the harder confirmation.
+export function isProduction(name) {
+  return !!servers.get(name)?.production;
+}
+
 // watchStatus keeps the sidebar dots live, reconnecting if the stream drops.
 export async function watchStatus(signal) {
   for (;;) {
@@ -49,12 +55,27 @@ export async function watchStatus(signal) {
   }
 }
 
+// abort builds the error a cancelled dialog throws, shaped so that every
+// caller's existing `if (aborted(e)) return` treats it as a non-event.
+function abort() {
+  const e = new Error('cancelled');
+  e.name = 'AbortError';
+  return e;
+}
+
 // runJob submits a statement and follows it to completion.
 //
 // onState fires for every transition so the UI can paint "running 2.1s"
 // with a cancel button and never sit on a blank screen. The returned
 // object exposes cancel(), which issues a real KILL QUERY server-side.
-export function runJob(request, { onState, signal } = {}) {
+//
+// onConfirm is asked when the server holds a statement back for being
+// destructive — an UPDATE or DELETE with no WHERE, a TRUNCATE, a DROP.
+// Answering yes resubmits the identical statement with the confirmation
+// attached; answering no aborts. A caller that passes no onConfirm gets
+// the refusal as an error, which is the right default: nothing runs
+// unasked just because a code path forgot to handle the question.
+export function runJob(request, { onState, signal, onConfirm } = {}) {
   const ctl = new AbortController();
   if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true });
 
@@ -66,8 +87,19 @@ export function runJob(request, { onState, signal } = {}) {
   // to lose and is cancelled as before.
   const detach = request.kind === 'ddl';
 
+  async function submit() {
+    try {
+      return await api.submit(request, ctl.signal);
+    } catch (e) {
+      const risk = e?.data?.confirm;
+      if (!risk || !onConfirm) throw e;
+      if (!await onConfirm(risk)) throw abort();
+      return api.submit({ ...request, confirm: true }, ctl.signal);
+    }
+  }
+
   const done = (async () => {
-    const snap = await api.submit(request, ctl.signal);
+    const snap = await submit();
     id = snap.job;
     onState?.(snap);
 

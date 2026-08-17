@@ -8,6 +8,7 @@ import { h, clear, modal, toast, fmtNum, svg } from './dom.js';
 import { api, aborted } from './api.js';
 import { layout, shortType } from './layout.js';
 import * as tabs from './tabs.js';
+import { isProduction } from './state.js';
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -20,6 +21,7 @@ export function openERM(server, db) {
   return tabs.open({
     key: 'erm:' + server + ':' + db,
     title: db + ' ⌗',
+    danger: isProduction(server),
     build: (pane, signal) => build(pane, signal, { server, db }),
   });
 }

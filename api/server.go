@@ -21,6 +21,9 @@ type serverView struct {
 	User    string   `json:"user"`
 	Port    int      `json:"port"`
 	HasPass bool     `json:"has_pass"`
+	// Production is what turns the GUI red for this server and what makes
+	// a destructive statement ask for its name instead of a click.
+	Production bool `json:"production"`
 }
 
 // sshView is the tunnel config minus its secrets.
@@ -36,12 +39,13 @@ type sshView struct {
 // serverInput is what the add/edit form sends back. An empty password
 // means "keep what is already in the config-file".
 type serverInput struct {
-	SSH  *sshInput `json:"ssh"`
-	Name string    `json:"name"`
-	Host string    `json:"host"`
-	User string    `json:"user"`
-	Pass string    `json:"pass"`
-	Port int       `json:"port"`
+	SSH        *sshInput `json:"ssh"`
+	Name       string    `json:"name"`
+	Host       string    `json:"host"`
+	User       string    `json:"user"`
+	Pass       string    `json:"pass"`
+	Port       int       `json:"port"`
+	Production bool      `json:"production"`
 }
 
 // sshInput is the tunnel half of the add/edit form.
@@ -57,11 +61,12 @@ type sshInput struct {
 // view strips the secrets off a configured server.
 func view(s config.Server) serverView {
 	v := serverView{
-		Name:    s.Name,
-		Host:    s.Host,
-		Port:    s.Port,
-		User:    s.User,
-		HasPass: s.Pass != "",
+		Name:       s.Name,
+		Host:       s.Host,
+		Port:       s.Port,
+		User:       s.User,
+		HasPass:    s.Pass != "",
+		Production: s.Production,
 	}
 	if s.SSH != nil {
 		v.SSH = &sshView{
@@ -80,14 +85,20 @@ func view(s config.Server) serverView {
 // the form left blank.
 func merge(in serverInput, old config.Server, isNew bool) config.Server {
 	s := config.Server{
-		Name: in.Name,
-		Host: in.Host,
-		Port: in.Port,
-		User: in.User,
-		Pass: in.Pass,
+		Name:       in.Name,
+		Host:       in.Host,
+		Port:       in.Port,
+		User:       in.User,
+		Pass:       in.Pass,
+		Production: in.Production,
 	}
 	if in.Pass == "" && !isNew {
 		s.Pass = old.Pass
+	}
+	// The form has no TLS field. Carrying it over keeps an edit from
+	// quietly dropping a per-server tls setting out of the config-file.
+	if !isNew {
+		s.TLS = old.TLS
 	}
 	if in.SSH != nil {
 		n := &config.SSH{

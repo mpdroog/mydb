@@ -43,6 +43,23 @@ open "http://localhost:9999"
 -h ADDR     listen address, overrides the config-file
 ```
 
+Windows
+-------
+```bash
+./build-windows.sh          # dist/mydb-windows-{amd64,arm64}.exe (+ .zip)
+```
+
+No cgo and no build step, so this is a plain cross-compile — the GUI is
+embedded in the binary and every dependency is pure Go. The script stamps the
+commit into the binary, so `mydb.exe` says what it is when it starts.
+
+Two things differ on Windows. There is no `chmod`, so mydb's "your config is
+world-readable" warning never fires and you have to lock the file down
+yourself with `icacls config.toml /inheritance:r /grant:r "%USERNAME%:F"`.
+And `agent = true` does not work: mydb reads `SSH_AUTH_SOCK` and dials it as
+a unix socket, while Windows OpenSSH publishes its agent as the named pipe
+`\\.\pipe\openssh-ssh-agent`. Use `key` or `pass` in `[server.ssh]` there.
+
 Config
 ------
 ```toml
@@ -54,9 +71,15 @@ mysql_connect = "5s"
 meta_query    = "5s"
 data_query    = "30s"
 ddl_query     = "60s"
-ssh_keepalive = "15s"
-conn_lifetime = "5m"
-idle_reap     = "10m"
+ssh_keepalive  = "15s"
+conn_lifetime  = "5m"
+idle_reap      = "10m"
+dashboard_poll = "3s"
+
+[log]
+queries     = "mydb-queries.jsonl"   # "" switches the query log off
+max_size_mb = 32
+keep        = 1
 
 [[server]]
 name = "prod-eu"
@@ -64,6 +87,7 @@ host = "127.0.0.1"     # as resolved on the SSH host
 port = 3306
 user = "readonly"
 pass = "hunter2"
+production = true      # red chrome, and destructive statements ask harder
 
   [server.ssh]
   host  = "bastion.example.com:22"
@@ -101,14 +125,23 @@ to load its last 1000 rows, ordered by primary key descending.
 ```
 Ctrl/Cmd+K       jump to any server, database or table
 Ctrl/Cmd+D       structure editor for the current table
-Ctrl/Cmd+Enter   run the query / reload the grid
+Ctrl/Cmd+Shift+D dashboard: what this server is doing right now
+Ctrl/Cmd+Shift+L the query log
+Ctrl/Cmd+Enter   run the statement the cursor is in / reload the grid
+Ctrl/Cmd+Shift+Enter   run every statement in the buffer
+Ctrl/Cmd+E       explain it   ·   Ctrl/Cmd+Shift+E runs it and explains it
+Ctrl/Cmd+Space   force the completion list (it also opens as you type)
 Ctrl/Cmd+T       new SQL console
-Ctrl/Cmd+W       close tab
+Ctrl/Cmd+W       close tab   ·   Ctrl/Cmd+Shift+W closes all of them
 Esc              cancel the running query
 /                focus the sidebar filter
+?                every shortcut, including these
 arrows           move around the grid
 Enter            edit the focused cell   ·   Ctrl+0 sets NULL
 ```
+
+`?` is the one to remember: the overlay is generated from the keymap
+itself, so it cannot drift out of date with what the keys actually do.
 
 The structure editor never applies anything blind: it asks the server for a
 dry-run first and shows you the exact `ALTER TABLE` before running it. Column
@@ -119,6 +152,175 @@ Inline row edits need a primary key; without one the grid is read-only. The
 `UPDATE` also carries the value the cell was showing (`col <=> ?`), so if
 somebody else changed the row in between you get a conflict instead of a
 silent clobber.
+
+What is this server doing?
+--------------------------
+`Ctrl/Cmd+Shift+D`, or the ◴ next to a server in the sidebar, opens a live
+dashboard. The polling happens in the Go process and arrives over SSE, so a
+dashboard left open in a background tab costs one round-trip per tick rather
+than a pile of stacked requests.
+
+```
+connections      threads running   queries/s      buffer pool hits
+  42 / 151              3            118.4            99.87%
+```
+
+MySQL has no CPU metric to report, so the dashboard shows the things that
+actually move when a server is in trouble: **threads running** (connections
+executing rather than waiting — the closest thing to a load average), the
+query rate, and the counters that should normally sit still. Anything moving
+in that last group is called out even when the number is small: slow queries,
+full scans, full joins, temporary tables spilling to disk, sort merge passes,
+row-lock waits, lock timeouts, deadlocks, aborted connections.
+
+Under the tiles:
+
+* **Blocked by** — who is holding up whom. Row-lock waits name both sides
+  and the statement each is running, and metadata locks do the same for the
+  case the schema-change section below is about: an `ALTER` queued behind an
+  open transaction that touched the table and never committed. Both sides
+  have a Kill button.
+* **Connections** — the process list, filterable, with sleeping connections
+  hidden by default. Kill takes two forms: `query` ends the statement and
+  leaves the connection up, `conn` disconnects it and rolls its transaction
+  back, and only the second one asks first.
+* **Open transactions** — how long each has been open, how many rows it has
+  locked and modified. A transaction that has been open for minutes holding
+  locks is usually the reason for everything else on this page.
+* **Top statements** — the statement shapes costing the most, ordered by
+  what they have cost *since the last tick* rather than since the server
+  started, which is the difference between "what has this server always
+  done" and "what is it doing now". Flags a shape that uses no index or
+  spills to disk.
+* **Memory** — buffer pool size against what is actually in it, InnoDB's
+  total allocation, and per-connection memory where the server reports it.
+* **Last deadlock** — the report verbatim, which is the only place either
+  fork keeps it.
+
+Pause freezes the view without closing the stream, so a busy server can be
+read at all. The process list is updated in place rather than rebuilt, so a
+Kill button is still there when the click lands.
+
+Servers differ about what they will tell you, and the dashboard says so
+rather than showing an empty panel: MariaDB reports per-connection memory
+and a progress percentage that MySQL does not, MariaDB 10.6 removed the
+lock-wait tables, and top statements and the memory breakdown need
+`performance_schema` to be on. Anything missing appears as a note with the
+reason.
+
+The SQL console
+---------------
+A buffer with several statements in it works the way a scratch file should.
+`Ctrl/Cmd+Enter` runs the statement the cursor is in, `Ctrl/Cmd+Shift+Enter`
+runs all of them in order, and each result gets a chip you can click back to:
+
+```
+[1  5 rows]  [2  1 row]  [3  ✗]
+```
+
+They run as separate jobs on separate round-trips — `MultiStatements` stays
+off, so a stacked statement still cannot ride along on one. The splitting
+happens on the Go side, because a semicolon inside a string is only a
+boundary if you do not read SQL, and mydb has exactly one thing that reads
+SQL. A stored routine is left whole rather than cut up at the semicolons in
+its body.
+
+Table and column names complete **as you type** — two characters is enough.
+It follows the clause you are in: after `FROM` or `JOIN` it offers tables,
+in the select list and after `WHERE`, `SET` or `ORDER BY` it offers the
+columns of the tables the statement names, and a dot after a table or an
+alias offers that table's columns alone.
+
+```
+SELECT cli|  FROM orders          → client, client_ref …
+SELECT * FROM ord|                → orders, order_items, ORDER BY …
+SELECT * FROM orders o WHERE o.|  → id, client, total, status …
+```
+
+Columns come from the tables the statement mentions, so `SELECT fie…` on its
+own offers tables and keywords until there is a `FROM` to read them from.
+It never blocks: it offers what has been loaded and fetches the rest for next
+time, and it stays out of the way inside a string literal. Escape dismisses
+it for the rest of the word.
+
+`Ctrl/Cmd+Space` forces the list open, where your desktop lets that through:
+on Linux the input-method switcher usually takes it before the browser sees
+it, which is why completion does not depend on it.
+
+`Ctrl/Cmd+E` draws the plan as a tree instead of `EXPLAIN`'s grid of
+columns, with the four things worth acting on called out — a full table
+scan, a full index scan, a filesort, a temporary table:
+
+```
+query block #1                          cost 1,235
+  filesort                              on o.total
+    orders   full table scan   no index used   5,000 rows   filtered 10%
+```
+
+`Ctrl/Cmd+Shift+E` is the measured version (`EXPLAIN ANALYZE` on MySQL,
+`ANALYZE FORMAT=JSON` on MariaDB). That one *runs* the statement, so it is
+offered for statements that read and refused for anything else — on MariaDB
+"let me see the plan" on a `DELETE` would delete the rows.
+
+Statements that name no rows
+----------------------------
+`DELETE FROM orders WHERE id = 5` and `DELETE FROM orders` are one keystroke
+apart. The second one does not run until you have seen what it would do:
+
+```
+DELETE on orders — no WHERE clause: this deletes every row in the table
+
+  DELETE FROM orders
+
+  [Count the rows first]   1,482,301 rows are about to be affected
+```
+
+That covers an `UPDATE` or `DELETE` with no `WHERE` of its own, a `TRUNCATE`,
+and a `DROP` of a table or a database. A `WHERE` belonging to a subquery does
+not count — `UPDATE t SET a = (SELECT x FROM z WHERE z.id = 1)` still changes
+every row of `t`, and that is exactly the one a keyword search gets wrong.
+A `LIMIT` is not accepted in place of a `WHERE` either: `DELETE FROM t LIMIT
+10` deletes ten rows nobody chose.
+
+The check is in the server, not in the browser, so nothing can route around
+it by not calling the dialog.
+
+Production servers
+------------------
+```toml
+[[server]]
+name = "prod-eu"
+production = true
+```
+
+It changes nothing about how mydb connects. It draws that server red
+everywhere it appears — in the tree, on its tabs, and as a rule along the top
+of every pane belonging to it — and it turns the dialog above into one you
+have to type the server's name into rather than click through.
+
+Query log
+---------
+Every statement mydb runs is appended to `mydb-queries.jsonl` next to
+`config.toml`, one JSON object per line: what ran, where, how long it took,
+how many rows, and what the error was if it failed. The Log button and
+`Ctrl/Cmd+Shift+L` search it; `grep` and `jq` read the same file.
+
+```bash
+jq -r 'select(.production) | "\(.at) \(.server) \(.sql)"' mydb-queries.jsonl
+```
+
+The format is deliberate: a crash mid-write costs one unparseable line
+rather than the file. It rotates at 32MiB and keeps one generation, both
+configurable under `[log]`; `queries = ""` switches it off.
+
+Loading a table into the grid is not logged — that is the GUI doing its job,
+not something you would go looking for. Console statements, schema changes
+and inline row edits are. An inline edit is recorded with its placeholders
+rather than its values, because mydb has one way to put a value into a
+statement and it is not string formatting.
+
+The file holds the literal values of everything you have typed, so it is
+created 0600, like `config.toml`.
 
 Encoding
 --------
@@ -251,7 +453,8 @@ editor's type field is parsed and rebuilt from recognised pieces rather than
 passed through.
 
 The config-file holds passwords in cleartext, like `~/.my.cnf` does. mydb warns
-if it is more readable than 0600.
+if it is more readable than 0600. The query log holds the literal values of
+every statement that ran and is written 0600 for the same reason.
 
 Develop
 -------

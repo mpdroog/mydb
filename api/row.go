@@ -11,6 +11,7 @@ import (
 	"github.com/mpdroog/mydb/config"
 	"github.com/mpdroog/mydb/connman"
 	"github.com/mpdroog/mydb/meta"
+	"github.com/mpdroog/mydb/qlog"
 	"github.com/mpdroog/mydb/writer"
 )
 
@@ -106,6 +107,25 @@ func (a *API) RowUpdate(w http.ResponseWriter, r *http.Request, _ httprouter.Par
 			"api.RowUpdate refused: row changed since it was loaded, reload the table", nil)
 		return
 	}
+
+	// An inline edit is a write to the database like any other, so it goes
+	// in the query log. The statement is recorded with its placeholders
+	// rather than the values: mydb has exactly one way to put a value into
+	// a statement, and it is not string formatting.
+	prod := false
+	if srv, e := config.ServerByName(in.Server); e == nil {
+		prod = srv.Production
+	}
+	qlog.Append(qlog.Entry{
+		Server:     in.Server,
+		DB:         in.DB,
+		Table:      in.Table,
+		Kind:       "row",
+		SQL:        stmt,
+		State:      "done",
+		Affected:   n,
+		Production: prod,
+	})
 
 	if e := writer.Encode(w, map[string]any{"ok": true, "affected": n}); e != nil {
 		writer.Err(w, http.StatusInternalServerError, "api.RowUpdate failed encoding", e)

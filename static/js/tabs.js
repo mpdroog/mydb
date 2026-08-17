@@ -12,15 +12,18 @@ let seq = 0;
 function bar() { return $('#tabbar'); }
 function panes() { return $('#panes'); }
 
-export function open({ key, title, build }) {
+export function open({ key, title, build, danger }) {
   const found = list.find((t) => t.key === key && key);
   if (found) { activate(found.id); return found; }
 
   const id = 'tab' + (++seq);
-  const pane = h('div', { class: 'pane', hidden: true });
+  // A pane belonging to a production server carries a red rule along its
+  // top edge. It is the one piece of chrome that is always in view while
+  // you work, which is the point.
+  const pane = h('div', { class: 'pane' + (danger ? ' prod' : ''), hidden: true });
   const ctl = new AbortController();
 
-  const btn = h('div', { class: 'tab', role: 'tab' },
+  const btn = h('div', { class: 'tab' + (danger ? ' prod' : ''), role: 'tab' },
     h('span', { class: 'label', text: title }),
     h('button', {
       class: 'x',
@@ -41,7 +44,15 @@ export function open({ key, title, build }) {
 
   tab.api = build(pane, ctl.signal, tab) || {};
   activate(id);
+  updateTools();
   return tab;
+}
+
+// updateTools shows the close-all button only when there is more than one
+// tab to close, so it is not a permanent piece of furniture.
+function updateTools() {
+  const btn = $('#close-all');
+  if (btn) btn.hidden = list.length < 2;
 }
 
 export function activate(id) {
@@ -71,10 +82,27 @@ export function close(id) {
     const next = list[Math.min(i, list.length - 1)];
     if (next) activate(next.id);
   }
+  updateTools();
 }
 
 export function closeActive() {
   if (active) close(active.id);
+}
+
+// closeAll empties the tab bar.
+//
+// Each tab is closed through close(), so every one of them disposes its
+// job and aborts its requests — which on the Go side cancels the query it
+// was waiting on. A schema change is the exception and detaches instead,
+// exactly as it does when you close its tab by hand.
+export function closeAll() {
+  for (const t of [...list]) close(t.id);
+}
+
+// count is how many tabs are open, for the confirmation on closing a lot
+// of them at once.
+export function count() {
+  return list.length;
 }
 
 export function current() {

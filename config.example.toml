@@ -22,11 +22,23 @@ data_query    = "30s"   # grid loads and console queries
 # it live (stage, percentage, elapsed) with a Cancel button, and it keeps
 # running if you close the tab. Set a duration here if you want one anyway.
 ddl_query     = "0s"    # 0 = no deadline
-ssh_keepalive = "15s"   # how fast a dead tunnel is noticed
-conn_lifetime = "5m"    # recycle pooled MySQL connections
-idle_reap     = "10m"   # close tunnel + pool after this much idle time
-http_read_hdr = "5s"
-http_idle     = "60s"
+ssh_keepalive  = "15s"  # how fast a dead tunnel is noticed
+conn_lifetime  = "5m"   # recycle pooled MySQL connections
+idle_reap      = "10m"  # close tunnel + pool after this much idle time
+http_read_hdr  = "5s"
+http_idle      = "60s"
+dashboard_poll = "3s"   # how often an open dashboard asks what the server is doing
+
+# Every statement mydb runs is appended here, one JSON object per line, so
+# "what did I run against prod last week" has an answer. The GUI searches it
+# (the Log button, or Ctrl/Cmd+Shift+L) and so does grep and jq. It holds the
+# literal values of your statements, so it is written 0600 like this file.
+[log]
+# Relative names are resolved next to this config-file. Set to "" to switch
+# the log off entirely.
+queries     = "mydb-queries.jsonl"
+max_size_mb = 32        # rotate once the file grows past this
+keep        = 1         # how many rotated generations to keep
 
 # A plain local server.
 [[server]]
@@ -35,6 +47,11 @@ host = "127.0.0.1"
 port = 3306
 user = "root"
 pass = ""
+# Mark the servers where a mistake is expensive. It changes nothing about how
+# mydb connects: it draws the server red everywhere it appears, and makes a
+# statement that changes data without a WHERE ask you to type the server's
+# name rather than click a button.
+#production = true
 
 # A server behind a bastion. host/port are resolved on the SSH host, so
 # 127.0.0.1 here means "localhost as the bastion sees it".
@@ -47,6 +64,7 @@ pass = ""
 #port = 3306
 #user = "readonly"
 #pass = "hunter2"
+#production = true
 #
 #  [server.ssh]
 #  host  = "bastion.example.com:22"

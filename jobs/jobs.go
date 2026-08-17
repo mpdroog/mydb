@@ -18,6 +18,8 @@ import (
 	"github.com/mpdroog/mydb/config"
 	"github.com/mpdroog/mydb/connman"
 	"github.com/mpdroog/mydb/meta"
+	"github.com/mpdroog/mydb/qlog"
+	"github.com/mpdroog/mydb/stmt"
 )
 
 // State is where a job sits in its lifecycle.
@@ -62,6 +64,27 @@ type Request struct {
 	Where  string `json:"where"`
 	Kind   Kind   `json:"kind"`
 	Limit  int    `json:"limit"`
+	// Confirm carries the answer to the dialog a destructive statement
+	// raises. It is false on the first submit by definition: the browser
+	// only sets it after the operator read what the statement would do.
+	Confirm bool `json:"confirm,omitempty"`
+}
+
+// ConfirmError is returned for a statement that changes data without saying
+// which rows. It is not a failure — it is the question the GUI turns into a
+// dialog, and it carries what that dialog needs to say.
+type ConfirmError struct {
+	Risk *stmt.Risk
+}
+
+// Error makes ConfirmError an error, so it can travel the same path as one.
+func (e *ConfirmError) Error() string {
+	target := e.Risk.Target
+	if target == "" {
+		target = "this table"
+	}
+	return fmt.Sprintf("jobs: %s on %s needs confirming: %s",
+		e.Risk.Verb, target, e.Risk.Reason)
 }
 
 // Event is one SSE message about a job.
@@ -177,6 +200,15 @@ func (m *Manager) Submit(r Request) (*Job, error) {
 		r.Kind = KindData
 	}
 
+	// A table open builds its own statement further down and is a SELECT by
+	// construction, so only free-form SQL is worth inspecting.
+	if !r.Confirm && r.Table == "" {
+		if risk := stmt.Inspect(r.SQL); risk != nil {
+			addCount(risk)
+			return nil, &ConfirmError{Risk: risk}
+		}
+	}
+
 	j := &Job{
 		ID:      "j" + strconv.FormatUint(m.seq.Add(1), 10),
 		Server:  r.Server,
@@ -198,6 +230,32 @@ func (m *Manager) Submit(r Request) (*Job, error) {
 	m.wg.Add(1)
 	go m.run(j)
 	return j, nil
+}
+
+// addCount fills in the statement the confirm dialog offers to run first,
+// so "this deletes every row" can be answered with a number.
+//
+// The name is quoted here rather than in the browser because mydb has one
+// identifier-quoting function and this is it. A name it will not quote —
+// too long, or holding a NUL — simply loses the offer.
+func addCount(risk *stmt.Risk) {
+	if !risk.Countable {
+		return
+	}
+	var (
+		q string
+		e error
+	)
+	if db, tbl, ok := strings.Cut(risk.Target, "."); ok {
+		q, e = meta.Qualify(db, tbl)
+	} else {
+		q, e = meta.QuoteIdent(risk.Target)
+	}
+	if e != nil {
+		risk.Countable = false
+		return
+	}
+	risk.CountSQL = "SELECT COUNT(*) AS rows_affected FROM " + q
 }
 
 // Get looks a job up by id.
@@ -269,7 +327,37 @@ func (m *Manager) run(j *Job) {
 	if e != nil && state == Errored {
 		log.Printf("jobs.run %s on %s: %s", j.ID, j.Server, e)
 	}
+	j.record()
 	j.emit()
+}
+
+// record appends the finished statement to the query log. It runs on the
+// job's own goroutine after the work is done, so nothing waits on a file
+// write, and a log that cannot be written never fails a query.
+func (j *Job) record() {
+	s := j.Snapshot()
+	// A table open is the grid doing its job, not something worth keeping:
+	// the log is for statements you might want to find again.
+	if s.Table != "" && s.State == Done {
+		return
+	}
+	prod := false
+	if cfg, e := config.ServerByName(j.Server); e == nil {
+		prod = cfg.Production
+	}
+	qlog.Append(qlog.Entry{
+		Server:     s.Server,
+		DB:         s.DB,
+		Table:      s.Table,
+		Kind:       string(j.Kind),
+		SQL:        s.SQL,
+		State:      string(s.State),
+		Error:      s.Error,
+		Elapsed:    s.Elapsed,
+		Rows:       s.Rows,
+		Affected:   s.Affected,
+		Production: prod,
+	})
 }
 
 // budgetName is the config key a job's deadline came from, so the error

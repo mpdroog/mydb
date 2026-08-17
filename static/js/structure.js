@@ -8,6 +8,7 @@ import { h, clear, modal, toast, fmtMs, fmtProgress } from './dom.js';
 import { api, aborted } from './api.js';
 import { runJob } from './state.js';
 import * as tabs from './tabs.js';
+import { isProduction } from './state.js';
 
 const EXTRAS = ['', 'AUTO_INCREMENT', 'ON UPDATE CURRENT_TIMESTAMP'];
 
@@ -15,6 +16,7 @@ export function openStructure(server, db, table) {
   return tabs.open({
     key: 'struct:' + server + ':' + db + ':' + table,
     title: table + ' ⚙',
+    danger: isProduction(server),
     build: (pane, signal) => build(pane, signal, { server, db, table }),
   });
 }

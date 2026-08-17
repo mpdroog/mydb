@@ -27,6 +27,22 @@ binary cells marked, `ORDER BY` puts the newest row first, a 5000-row table
 keeps only a viewport of rows in the DOM, tabs switch and close, and named-key
 shortcuts fire.
 
+It also covers, in the same live-DOM way: the keyboard overlay is built from
+the keymap and every binding is described; close-all empties the tab bar; a
+multi-statement buffer runs as separate jobs with one result chip each; an
+unguarded `DELETE` raises the confirm dialog instead of running, the danger
+button is not the focused default, and cancelling closes it; a production
+server is drawn red in the tree and on its panes; the query log lists what
+this run just executed and narrows on search; the dashboard draws its tiles
+and its process list, marks its own polling connection, and updates rows in
+place rather than rebuilding them under the cursor; the plan renderer reads
+both MySQL's and MariaDB's JSON, and refuses to "analyze" anything that
+writes; and completion offers tables for a prefix and that table's columns
+after a dot.
+
+Nothing it runs writes to the database: the confirm-gate test points at a
+table that does not exist, since the gate fires before any database work.
+
 Seed data
 ---------
 ```sql

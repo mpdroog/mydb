@@ -4,3 +4,9 @@ mydb
 # config.toml, .bak, .tmp, .prod, and whatever the next one is called.
 # config.example.toml does not match this and stays tracked.
 config.toml*
+
+# The query log holds the literal values of every statement that ran.
+mydb-queries.jsonl*
+
+# Cross-compiled binaries.
+dist/

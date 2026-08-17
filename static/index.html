@@ -17,12 +17,19 @@
     <nav id="tree" aria-label="Servers"></nav>
     <footer class="side-foot">
       <button id="open-sql" type="button" title="New SQL console">SQL</button>
-      <span id="hint">Ctrl+K</span>
+      <button id="open-qlog" type="button" title="Query log — everything mydb has run">Log</button>
+      <span class="grow"></span>
+      <button id="open-help" type="button" title="Keyboard shortcuts (?)">?</button>
     </footer>
   </aside>
 
   <main id="main">
-    <div id="tabbar" role="tablist"></div>
+    <div id="tabrow">
+      <div id="tabbar" role="tablist"></div>
+      <div id="tabtools">
+        <button id="close-all" type="button" title="Close every tab (Ctrl/Cmd+Shift+W)" hidden>Close all</button>
+      </div>
+    </div>
     <div id="panes"></div>
   </main>
 </div>

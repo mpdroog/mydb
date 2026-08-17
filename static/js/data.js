@@ -6,7 +6,7 @@
 
 import { h, clear, toast, fmtNum, fmtMs, fmtProgress } from './dom.js';
 import { api, aborted } from './api.js';
-import { runJob } from './state.js';
+import { runJob, isProduction } from './state.js';
 import { createGrid } from './grid.js';
 import * as tabs from './tabs.js';
 import { openStructure } from './structure.js';
@@ -17,6 +17,7 @@ export function openTable(server, db, table) {
   return tabs.open({
     key: 'data:' + server + ':' + db + ':' + table,
     title: table,
+    danger: isProduction(server),
     build: (pane, signal, tab) => build(pane, signal, tab, { server, db, table }),
   });
 }

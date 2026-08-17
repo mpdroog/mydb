@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -23,6 +24,20 @@ func (a *API) QuerySubmit(w http.ResponseWriter, r *http.Request, _ httprouter.P
 
 	j, e := a.Jobs.Submit(req)
 	if e != nil {
+		// A statement that changes data without naming which rows is not a
+		// bad request, it is an unanswered question. It comes back as JSON
+		// so the GUI can raise the dialog rather than show a red toast.
+		var confirm *jobs.ConfirmError
+		if errors.As(e, &confirm) {
+			log.Printf("api.QuerySubmit held back: %s", e)
+			if e := writer.EncodeCode(w, http.StatusConflict, map[string]any{
+				"error":   e.Error(),
+				"confirm": confirm.Risk,
+			}); e != nil {
+				writer.Err(w, http.StatusInternalServerError, "api.QuerySubmit failed encoding", e)
+			}
+			return
+		}
 		writer.Err(w, http.StatusBadRequest, "api.QuerySubmit failed starting job", e)
 		return
 	}

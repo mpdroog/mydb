@@ -97,6 +97,39 @@ export function fmtNum(n) {
   return Number(n || 0).toLocaleString();
 }
 
+// fmtBytes renders a byte count the way a person reads one.
+export function fmtBytes(n) {
+  n = Number(n || 0);
+  if (n < 1024) return n + ' B';
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
+}
+
+// fmtSecs renders a duration given in seconds, biggest unit first. Used for
+// uptime and for how long something has been waiting, where "4d 6h" says
+// more than a number of seconds ever does.
+export function fmtSecs(s) {
+  s = Math.max(0, Math.floor(Number(s || 0)));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  if (m) return m + 'm ' + (s % 60) + 's';
+  return s + 's';
+}
+
+// fmtPerSec keeps a rate readable at both ends: 0.02/s and 14,000/s.
+export function fmtPerSec(v) {
+  v = Number(v || 0);
+  if (v === 0) return '0';
+  if (v < 1) return v.toFixed(2);
+  if (v < 100) return v.toFixed(1);
+  return fmtNum(Math.round(v));
+}
+
 export function fmtMs(ms) {
   if (ms < 1000) return ms + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + 's';
