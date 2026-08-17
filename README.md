@@ -21,6 +21,15 @@ Two things drove the design:
   `KILL QUERY` on the connection running it. The grid virtualizes its rows, so
   a wide table scrolls the same as a narrow one.
 
+![mydb's schema diagram: tables in clusters, one declared foreign key, and seventeen links inferred from column naming and drawn dashed](doc/erm-diagram.png)
+
+The schema diagram, on a database with exactly one foreign key in it. The
+other seventeen links were inferred from naming, and are dashed because a
+guess must never be drawn to look like a constraint. Tables are grouped by
+what they connect to — `users` and the eight tables that point at it — and
+the footer says how much of the schema is on screen, with the key-shaped
+columns mydb chose *not* to link one click away.
+
 Install
 -------
 ```bash
