@@ -4,7 +4,7 @@
 // dry-run first and puts the exact ALTER TABLE on screen. Applying then
 // runs as a normal job, so a long table-rebuild stays cancellable.
 
-import { h, clear, modal, toast, fmtMs } from './dom.js';
+import { h, clear, modal, toast, fmtMs, fmtProgress } from './dom.js';
 import { api, aborted } from './api.js';
 import { runJob } from './state.js';
 import * as tabs from './tabs.js';
@@ -25,9 +25,14 @@ function build(pane, signal, ctx) {
   const applyBtn = h('button', { type: 'button', text: 'Preview changes…' });
   const reloadBtn = h('button', { type: 'button', text: 'Reload' });
   const createBtn = h('button', { type: 'button', text: 'SHOW CREATE' });
+  const cancelBtn = h('button', {
+    type: 'button', class: 'danger', text: 'Cancel', hidden: true,
+    title: 'Abort the running statement. A table rebuild then has to roll '
+      + 'back, which can take as long again as it has already run.',
+  });
   const head = h('div', { class: 'pane-head' },
     h('span', { class: 'muted mono', text: ctx.db + '.' + ctx.table }),
-    h('span', { class: 'grow' }), createBtn, reloadBtn, applyBtn,
+    h('span', { class: 'grow' }), cancelBtn, createBtn, reloadBtn, applyBtn,
   );
 
   const bodyEl = h('div', { class: 'struct' });
@@ -37,6 +42,7 @@ function build(pane, signal, ctx) {
   pane.append(head, bodyEl, foot);
 
   let current = null;   // last structure from the server
+  let job = null;       // the ALTER in flight, if any
   let cols = [];        // editable column models
   let idxs = [];        // editable index models
   let pkText = null;
@@ -214,6 +220,12 @@ function build(pane, signal, ctx) {
       h('div', {},
         h('p', { class: 'note', text: 'This exact statement will run on the server.' }),
         h('pre', { class: 'sql', text: sql }),
+        h('p', {
+          class: 'note',
+          text: 'It runs without a deadline, because a table rebuild can take '
+            + 'many minutes and cutting it off would lose the work. You get live '
+            + 'progress and a Cancel button, and it keeps going if you close the tab.',
+        }),
       ),
       [h('button', { type: 'button', text: 'Cancel', onclick: () => close() }), applyNow],
     );
@@ -225,22 +237,37 @@ function build(pane, signal, ctx) {
     });
   }
 
+  // apply runs the ALTER as a job with no deadline. A table rebuild can
+  // legitimately take many minutes, so instead of a timeout it gets live
+  // progress and a cancel button, and it keeps running if this tab closes.
   async function apply() {
     status.textContent = 'applying…';
     status.className = 'busy spin';
+    applyBtn.disabled = true;
     try {
       const snap = await api.alter({
         server: ctx.server, db: ctx.db, table: ctx.table, desired: desired(), dry: false,
       }, signal);
 
-      // The alter runs as a job; follow it to completion.
-      const job = runJob({ server: ctx.server, db: ctx.db, sql: snap.sql, kind: 'ddl' }, { signal });
+      job = runJob({ server: ctx.server, db: ctx.db, sql: snap.sql, kind: 'ddl' }, {
+        signal,
+        onState: (s) => {
+          if (s.state !== 'running' && s.state !== 'queued') return;
+          cancelBtn.hidden = false;
+          const p = fmtProgress(s.progress);
+          status.textContent = 'altering ' + fmtMs(s.elapsed_ms) + (p ? ' · ' + p : '');
+        },
+      });
+
       const res = await job.promise;
       toast('Applied in ' + fmtMs(res.elapsed_ms), 'ok');
       await load();
     } catch (e) {
       if (!aborted(e)) { status.textContent = 'failed'; toast(e.message, 'err'); }
     } finally {
+      job = null;
+      cancelBtn.hidden = true;
+      applyBtn.disabled = false;
       status.className = '';
     }
   }
@@ -256,10 +283,18 @@ function build(pane, signal, ctx) {
   applyBtn.addEventListener('click', preview);
   reloadBtn.addEventListener('click', load);
   createBtn.addEventListener('click', showCreate);
+  cancelBtn.addEventListener('click', () => job?.cancel());
 
   load();
 
-  return { kind: 'struct', ctx, reload: load };
+  return {
+    kind: 'struct',
+    ctx,
+    reload: load,
+    cancel: () => job?.cancel(),
+    // No dispose() that kills the job: an ALTER keeps running when its tab
+    // is closed, and the server keeps it observable.
+  };
 }
 
 function splitList(s) {

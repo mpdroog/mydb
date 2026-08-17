@@ -4,7 +4,7 @@
 // Ctrl/Cmd+Enter; the request itself is a job, so a heavy query shows a
 // timer and a Cancel button instead of locking the tab.
 
-import { h, modal, toast, fmtNum, fmtMs } from './dom.js';
+import { h, modal, toast, fmtNum, fmtMs, fmtProgress } from './dom.js';
 import { aborted } from './api.js';
 import { runJob, servers } from './state.js';
 import { createGrid } from './grid.js';
@@ -90,8 +90,10 @@ function build(pane, signal, ctx) {
     }, {
       signal,
       onState: (s) => {
-        if (s.state === 'queued') status.textContent = 'waiting for connection';
-        else if (s.state === 'running') status.textContent = 'running ' + fmtMs(s.elapsed_ms);
+        if (s.state === 'queued') { status.textContent = 'waiting for connection'; return; }
+        if (s.state !== 'running') return;
+        const p = fmtProgress(s.progress);
+        status.textContent = 'running ' + fmtMs(s.elapsed_ms) + (p ? ' · ' + p : '');
       },
     });
 

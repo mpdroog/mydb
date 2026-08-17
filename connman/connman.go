@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,11 +37,14 @@ var ErrNotReady = errors.New("connman: server not ready")
 
 // Status is one server's live state, as sent to the browser.
 type Status struct {
-	Name  string `json:"name"`
-	State State  `json:"state"`
-	Error string `json:"error,omitempty"`
-	SSH   bool   `json:"ssh"`
-	Idle  int64  `json:"idle_seconds"`
+	Name string `json:"name"`
+	// Flavor is "mariadb" or "mysql", empty until the server has answered.
+	Flavor  string `json:"flavor,omitempty"`
+	Version string `json:"version,omitempty"`
+	State   State  `json:"state"`
+	Error   string `json:"error,omitempty"`
+	SSH     bool   `json:"ssh"`
+	Idle    int64  `json:"idle_seconds"`
 }
 
 // conn holds everything belonging to one configured server.
@@ -51,6 +55,8 @@ type conn struct {
 	lastErr  error
 	name     string
 	netName  string
+	flavor   string
+	version  string
 	state    State
 	lastUsed atomic.Int64
 	active   atomic.Int32
@@ -115,7 +121,9 @@ func (m *Manager) get(name string) *conn {
 // publish pushes a state change out to the SSE subscribers.
 // Caller must NOT hold c.mu beyond reading the fields it passes in.
 func (m *Manager) publish(c *conn, state State, e error) {
-	s := Status{Name: c.name, State: state}
+	c.mu.Lock()
+	s := Status{Name: c.name, State: state, Flavor: c.flavor, Version: c.version}
+	c.mu.Unlock()
 	if e != nil {
 		s.Error = e.Error()
 	}
@@ -318,7 +326,32 @@ func (m *Manager) open(ctx context.Context, c *conn, cfg config.Server, t config
 		}
 		return nil, nil, fmt.Errorf("connman.open ping %s: %w", cfg.Addr(), e)
 	}
+
+	// One extra round-trip while we are here: which server is this really?
+	// MariaDB and MySQL differ in enough places that the sidebar showing
+	// which one you are about to alter is worth a query.
+	var version string
+	if e := db.QueryRowContext(pctx, "SELECT VERSION()").Scan(&version); e != nil {
+		log.Printf("connman.open %s version: %s", c.name, e)
+	}
+	c.mu.Lock()
+	c.version = version
+	c.flavor = flavorOf(version)
+	c.mu.Unlock()
+
 	return tun, db, nil
+}
+
+// flavorOf reads the fork out of a version string such as
+// "10.11.14-MariaDB-0ubuntu0.24.04.1" or "8.0.35".
+func flavorOf(version string) string {
+	if version == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(version), "mariadb") {
+		return "mariadb"
+	}
+	return "mysql"
 }
 
 // registered tracks which driver network-names we already claimed.
@@ -389,6 +422,7 @@ func (m *Manager) Status() []Status {
 		if ok {
 			c.mu.Lock()
 			st.State = c.state
+			st.Flavor, st.Version = c.flavor, c.version
 			if c.lastErr != nil {
 				st.Error = c.lastErr.Error()
 			}

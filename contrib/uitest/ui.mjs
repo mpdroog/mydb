@@ -127,6 +127,28 @@ if (rows.length) {
   ok($$('#panes .gc.bin').length > 0, 'binary cells are marked .bin');
 }
 
+console.log('--- flavor badge + encoding labels ---');
+const badge = $('#tree .node.server .flavor');
+ok(!!badge && badge.classList.contains('mariadb'), 'server carries a MariaDB badge',
+   badge ? badge.className : 'no badge');
+ok(/MariaDB \d/.test(badge?.title || ''), 'badge tooltip names the version', badge?.title);
+
+const dbRow = nodeNamed('db', 'mydb_test');
+ok(dbRow.querySelector('.sub.enc')?.textContent === 'utf8mb4',
+   'database row shows its default charset',
+   dbRow.querySelector('.sub.enc')?.textContent);
+
+function encOf(name) {
+  const n = nodeNamed('table', name);
+  const e = n?.querySelector('.sub.enc');
+  return e ? [...e.classList].filter((c) => c === 'bad' || c === 'warn')[0] + ':' + e.textContent : 'none';
+}
+ok(encOf('legacy_latin1') === 'bad:latin1', 'a latin1 table is flagged red', encOf('legacy_latin1'));
+ok(encOf('odd_collation') === 'warn:unicode_ci', 'a differing collation is flagged amber', encOf('odd_collation'));
+ok(encOf('matches_db') === 'none', 'a matching table shows its row count, not an encoding', encOf('matches_db'));
+ok(encOf('paid_orders') === 'none', 'a view is not flagged', encOf('paid_orders'));
+ok(/latin1/.test(nodeNamed('table', 'legacy_latin1').title), 'the tooltip explains the mismatch');
+
 console.log('--- virtualization: a 5000-row table must not build 5000 rows ---');
 const big = nodeNamed('table', 'big');
 click(big, 2);

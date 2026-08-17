@@ -15,7 +15,13 @@ ssh_dial      = "5s"    # TCP + SSH handshake to the bastion
 mysql_connect = "5s"    # MySQL handshake once the tunnel is up
 meta_query    = "5s"    # database/table/structure lookups
 data_query    = "30s"   # grid loads and console queries
-ddl_query     = "60s"   # ALTER TABLE
+# ALTER TABLE has NO deadline by default, and that is deliberate. A deadline
+# bounds work that might never finish; an ALTER will finish, and killing it
+# half-way through a table rebuild throws away the work done so far and then
+# makes you wait for the rollback. A long ALTER is slow, not hung: mydb shows
+# it live (stage, percentage, elapsed) with a Cancel button, and it keeps
+# running if you close the tab. Set a duration here if you want one anyway.
+ddl_query     = "0s"    # 0 = no deadline
 ssh_keepalive = "15s"   # how fast a dead tunnel is noticed
 conn_lifetime = "5m"    # recycle pooled MySQL connections
 idle_reap     = "10m"   # close tunnel + pool after this much idle time
@@ -57,3 +63,10 @@ pass = ""
 # reports one row affected, and the grid would show a value the database
 # does not hold. Set to "" to inherit the server's own global sql_mode.
 sql_mode = "STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION"
+
+# This is the deadline that actually matters for DDL. MySQL ships with
+# lock_wait_timeout at a year and MariaDB at a day, so an ALTER that cannot get
+# its metadata lock queues behind whatever holds it -- and then every read and
+# write of that table queues behind the ALTER. Failing in half a minute is much
+# kinder than taking the table down. Set "0s" to leave the server's own value.
+lock_wait_timeout = "30s"

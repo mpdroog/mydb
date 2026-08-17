@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/mpdroog/mydb/config"
@@ -32,8 +33,14 @@ func openPool(s config.Server, network string, t config.Timeout) (*sql.DB, error
 	// Strict session mode. Without it a server silently truncates on write
 	// and still reports success, so an inline edit could store something
 	// other than what the grid then shows.
+	c.Params = map[string]string{}
 	if mode := config.SQLMode(); mode != "" {
-		c.Params = map[string]string{"sql_mode": quoteParam(mode)}
+		c.Params["sql_mode"] = quoteParam(mode)
+	}
+	// Bound the wait for a metadata lock. This is the deadline that keeps a
+	// blocked ALTER from taking a table offline behind it.
+	if secs := config.LockWait(); secs > 0 {
+		c.Params["lock_wait_timeout"] = strconv.Itoa(secs)
 	}
 
 	// Transport. Tunnelled servers get their confidentiality from SSH;
@@ -99,13 +106,16 @@ func quoteParam(v string) string {
 // write that happened to reuse it. One extra round-trip per statement is
 // cheap next to that.
 func ApplySession(ctx context.Context, conn *sql.Conn) error {
-	mode := config.SQLMode()
-	if mode == "" {
-		return nil
+	// Placeholders work for SET SESSION, so nothing has to be interpolated.
+	if mode := config.SQLMode(); mode != "" {
+		if _, e := conn.ExecContext(ctx, "SET SESSION sql_mode = ?", mode); e != nil {
+			return fmt.Errorf("connman.ApplySession sql_mode: %w", e)
+		}
 	}
-	// A placeholder works here, so the mode never has to be interpolated.
-	if _, e := conn.ExecContext(ctx, "SET SESSION sql_mode = ?", mode); e != nil {
-		return fmt.Errorf("connman.ApplySession: %w", e)
+	if secs := config.LockWait(); secs > 0 {
+		if _, e := conn.ExecContext(ctx, "SET SESSION lock_wait_timeout = ?", secs); e != nil {
+			return fmt.Errorf("connman.ApplySession lock_wait_timeout: %w", e)
+		}
 	}
 	return nil
 }

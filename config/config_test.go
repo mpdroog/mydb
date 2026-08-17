@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,7 +35,8 @@ func TestDefaults(t *testing.T) {
 	}{
 		{"ssh_dial", tm.SSHDial, 5 * time.Second},
 		{"data_query", tm.DataQuery, 30 * time.Second},
-		{"ddl_query", tm.DDLQuery, 60 * time.Second},
+		// ddl_query is covered by TestDDLHasNoDeadlineByDefault: it is the
+		// one budget that defaults to unbounded, on purpose.
 		{"idle_reap", tm.IdleReap, 10 * time.Minute},
 	} {
 		if c.got.D() != c.want {
@@ -192,5 +194,89 @@ func TestTLSMode(t *testing.T) {
 	}
 	if e := Open(path); e == nil {
 		t.Error("Open accepted an unknown tls mode")
+	}
+}
+
+func TestDDLHasNoDeadlineByDefault(t *testing.T) {
+	// A deadline bounds work that might never finish; an ALTER will finish,
+	// and killing it half-way loses the work and then charges for the
+	// rollback. So the default is 0 = unbounded, and the lock wait is what
+	// gets bounded instead.
+	write(t, "")
+	if got := Timeouts().DDLQuery.D(); got != 0 {
+		t.Errorf("ddl_query = %s, want 0 (no deadline)", got)
+	}
+	if got := LockWait(); got != int(DefaultLockWait/time.Second) {
+		t.Errorf("lock_wait_timeout = %ds, want %ds", got, int(DefaultLockWait/time.Second))
+	}
+
+	// An explicit budget is still honoured.
+	write(t, "[timeout]\nddl_query = \"10m\"\n")
+	if got := Timeouts().DDLQuery.D(); got != 10*time.Minute {
+		t.Errorf("ddl_query = %s, want 10m", got)
+	}
+
+	// And the lock wait can be handed back to the server.
+	write(t, "[mysql]\nlock_wait_timeout = \"0s\"\n")
+	if got := LockWait(); got != 0 {
+		t.Errorf("lock_wait_timeout = %d, want 0 (leave the server's)", got)
+	}
+}
+
+func TestSaveKeepsDefaultsOutOfTheFile(t *testing.T) {
+	// The bug this guards: config.save() used to write the *resolved*
+	// config, so the first GUI-driven save froze every default into the
+	// file. A later change to a default could then never reach the user --
+	// which is exactly how a 60s ddl_query survived becoming unbounded.
+	path := write(t, "listen = \"localhost:9999\"\n\n[[server]]\nname=\"a\"\nhost=\"h\"\n")
+
+	if e := AddServer(Server{Name: "b", Host: "h2", Port: 3306}); e != nil {
+		t.Fatal(e)
+	}
+
+	body, e := os.ReadFile(path) //nolint:gosec // G304: path is this test's own t.TempDir()
+	if e != nil {
+		t.Fatal(e)
+	}
+	got := string(body)
+	for _, unwanted := range []string{"[timeout]", "ddl_query", "data_query", "[mysql]", "sql_mode"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("save() wrote %q into a config that never set it:\n%s", unwanted, got)
+		}
+	}
+	// The servers, which the user *did* set, must survive.
+	for _, wanted := range []string{`name = "a"`, `name = "b"`} {
+		if !strings.Contains(got, wanted) {
+			t.Errorf("save() lost %q:\n%s", wanted, got)
+		}
+	}
+
+	// And reloading still resolves the defaults in memory.
+	if e := Open(path); e != nil {
+		t.Fatal(e)
+	}
+	if got := Timeouts().DataQuery.D(); got != 30*time.Second {
+		t.Errorf("data_query = %s, want the 30s default", got)
+	}
+	if got := Timeouts().DDLQuery.D(); got != 0 {
+		t.Errorf("ddl_query = %s, want 0 (unbounded)", got)
+	}
+}
+
+func TestSaveKeepsWhatWasSet(t *testing.T) {
+	// A value the user did write must survive a GUI save untouched.
+	path := write(t, "[timeout]\nddl_query = \"10m\"\n\n[[server]]\nname=\"a\"\nhost=\"h\"\n")
+	if e := AddServer(Server{Name: "b", Host: "h2"}); e != nil {
+		t.Fatal(e)
+	}
+	body, e := os.ReadFile(path) //nolint:gosec // G304: path is this test's own t.TempDir()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(string(body), `ddl_query = "10m0s"`) {
+		t.Errorf("save() dropped an explicitly set ddl_query:\n%s", body)
+	}
+	if strings.Contains(string(body), "data_query") {
+		t.Errorf("save() materialised a default alongside it:\n%s", body)
 	}
 }

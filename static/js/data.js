@@ -4,7 +4,7 @@
 // the job reports back, so a double-click is never followed by a frozen
 // window. The Cancel button issues a real KILL QUERY on the server.
 
-import { h, clear, toast, fmtNum, fmtMs } from './dom.js';
+import { h, clear, toast, fmtNum, fmtMs, fmtProgress } from './dom.js';
 import { api, aborted } from './api.js';
 import { runJob } from './state.js';
 import { createGrid } from './grid.js';
@@ -84,7 +84,10 @@ function build(pane, signal, tab, ctx) {
       signal,
       onState: (s) => {
         if (s.state === 'running' || s.state === 'queued') {
-          status.textContent = s.state === 'queued' ? 'waiting for connection' : 'running ' + fmtMs(s.elapsed_ms);
+          const p = fmtProgress(s.progress);
+          status.textContent = s.state === 'queued'
+            ? 'waiting for connection'
+            : 'running ' + fmtMs(s.elapsed_ms) + (p ? ' · ' + p : '');
         }
         if (s.sql) sqlNote.textContent = s.sql.replace(/\s+/g, ' ');
       },

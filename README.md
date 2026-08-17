@@ -120,6 +120,78 @@ Inline row edits need a primary key; without one the grid is read-only. The
 somebody else changed the row in between you get a conflict instead of a
 silent clobber.
 
+Encoding
+--------
+Databases show their default charset in the sidebar. Tables normally show a
+row count instead — the encoding only appears when it *disagrees* with the
+database it lives in, which is the case worth looking at:
+
+```
+▾ ● Ma local
+  ▾ shop                              utf8mb4
+      orders                              5,102
+      legacy_latin1                      latin1     ← red
+      odd_collation                   unicode_ci    ← amber
+      order_items                            83
+```
+
+* **Red** is a charset mismatch. That one silently mangles text on the way in
+  or out, and is usually a table created before the database was converted.
+* **Amber** is the same charset with a different collation. Milder, but real:
+  joining those columns raises `Illegal mix of collations` rather than
+  returning rows.
+
+The collation is joined back to its charset through
+`information_schema.COLLATIONS` rather than split off the name, so an unusual
+collation cannot be misread. Views are never flagged — they have no encoding
+of their own.
+
+Not covered yet: a single **column** whose charset differs from its own
+table's default. That is the sneakiest version of this bug, and the sidebar
+cannot show it.
+
+Long schema changes
+-------------------
+`ALTER TABLE` has **no deadline** by default, and that is deliberate.
+
+A deadline bounds work that might never finish. An `ALTER` will finish. Killing
+one half-way through a table rebuild throws away the work done so far and then
+makes you wait for the rollback, so you get neither the change nor the time
+back. A ten-minute `ALTER` is slow, not hung.
+
+What can hang forever is the metadata lock the statement needs before it can
+start — and that one is genuinely dangerous, because every read and write of
+the table queues behind a blocked `ALTER`. So that is what gets bounded:
+`lock_wait_timeout` is set to 30s rather than MySQL's default of a year.
+
+Instead of a timeout, a running statement is watched. Every two seconds mydb
+asks the server what its own connection is doing and shows it:
+
+```
+altering 4m12s · stage 1/2 · 63.4% · copy to tmp table
+```
+
+MariaDB reports the stage and percentage directly; on MySQL there are no such
+columns in `information_schema.PROCESSLIST`, so only the state is shown and
+mydb stops asking for the rest after the first attempt.
+
+A schema change also **outlives its tab**. Closing the tab drops the buffered
+result but leaves the statement running and still observable, because losing a
+nine-minute rebuild to a stray Ctrl+W would be miserable. Cancel is explicit,
+and issues a real `KILL QUERY`. Finished jobs are dropped on tab close as
+before.
+
+Set `ddl_query` under `[timeout]` if you want a deadline anyway.
+
+Config the GUI writes
+---------------------
+Adding or editing a server rewrites `config.toml`, and it writes back **only
+what you actually set** — never the resolved defaults. That distinction
+matters: an earlier version saved the resolved config, so the first GUI save
+froze every default into the file, and no later change to a default could ever
+reach you again. If your `config.toml` has a full `[timeout]` block you did not
+write, that is where it came from; delete it and the current defaults apply.
+
 Strictness
 ----------
 mydb connects with `sql_mode = STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION`

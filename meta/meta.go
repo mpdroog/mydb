@@ -45,31 +45,59 @@ func Qualify(db, table string) (string, error) {
 
 // Table is one row of the table-list in the sidebar.
 type Table struct {
-	Name    string `json:"name"`
-	Engine  string `json:"engine"`
-	Comment string `json:"comment"`
-	Type    string `json:"type"`
-	Rows    int64  `json:"rows"`
+	Name      string `json:"name"`
+	Engine    string `json:"engine"`
+	Comment   string `json:"comment"`
+	Type      string `json:"type"`
+	Charset   string `json:"charset"`
+	Collation string `json:"collation"`
+	Rows      int64  `json:"rows"`
 }
 
-// Databases lists the schemas on the server.
-func Databases(ctx context.Context, q Querier) ([]string, error) {
-	out, e := Strings(ctx, q, "SHOW DATABASES")
+// Database is one schema with the encoding new tables inherit from it.
+type Database struct {
+	Name      string `json:"name"`
+	Charset   string `json:"charset"`
+	Collation string `json:"collation"`
+}
+
+// databaseQuery reads the schema list with its default encoding.
+// information_schema.SCHEMATA only shows schemas the user may see, so it
+// needs no extra privilege over SHOW DATABASES.
+const databaseQuery = `SELECT SCHEMA_NAME,
+       IFNULL(DEFAULT_CHARACTER_SET_NAME,''), IFNULL(DEFAULT_COLLATION_NAME,'')
+  FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME`
+
+// Databases lists the schemas on the server with their default encoding.
+func Databases(ctx context.Context, q Querier) ([]Database, error) {
+	res, e := Query(ctx, q, 0, databaseQuery)
 	if e != nil {
 		return nil, e
 	}
-	sort.Strings(out)
+	out := make([]Database, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		out = append(out, Database{
+			Name:      deref(r[0]),
+			Charset:   deref(r[1]),
+			Collation: deref(r[2]),
+		})
+	}
 	return out, nil
 }
 
 // Tables lists a schema's tables and views with their row-estimate.
 // TABLE_ROWS is an estimate on InnoDB, which is fine for a sidebar hint.
 func Tables(ctx context.Context, q Querier, db string) ([]Table, error) {
-	const query = `SELECT TABLE_NAME, IFNULL(ENGINE,''), IFNULL(TABLE_ROWS,0),
-	       IFNULL(TABLE_COMMENT,''), TABLE_TYPE
-	  FROM information_schema.TABLES
-	 WHERE TABLE_SCHEMA = ?
-	 ORDER BY TABLE_NAME`
+	// The collation is joined back to its charset rather than split off the
+	// name, so an unusual collation cannot be misread.
+	const query = `SELECT t.TABLE_NAME, IFNULL(t.ENGINE,''), IFNULL(t.TABLE_ROWS,0),
+	       IFNULL(t.TABLE_COMMENT,''), t.TABLE_TYPE,
+	       IFNULL(t.TABLE_COLLATION,''), IFNULL(c.CHARACTER_SET_NAME,'')
+	  FROM information_schema.TABLES t
+	  LEFT JOIN information_schema.COLLATIONS c
+	         ON c.COLLATION_NAME = t.TABLE_COLLATION
+	 WHERE t.TABLE_SCHEMA = ?
+	 ORDER BY t.TABLE_NAME`
 
 	res, e := Query(ctx, q, 0, query, db)
 	if e != nil {
@@ -79,10 +107,12 @@ func Tables(ctx context.Context, q Querier, db string) ([]Table, error) {
 	out := make([]Table, 0, len(res.Rows))
 	for _, r := range res.Rows {
 		t := Table{
-			Name:    deref(r[0]),
-			Engine:  deref(r[1]),
-			Comment: deref(r[3]),
-			Type:    deref(r[4]),
+			Name:      deref(r[0]),
+			Engine:    deref(r[1]),
+			Comment:   deref(r[3]),
+			Type:      deref(r[4]),
+			Collation: deref(r[5]),
+			Charset:   deref(r[6]),
 		}
 		if n, e := strconv.ParseInt(deref(r[2]), 10, 64); e == nil {
 			t.Rows = n

@@ -24,7 +24,15 @@ var (
 	Path string
 
 	mu sync.RWMutex
-	c  Config
+	// raw is exactly what the config-file holds, and the only thing ever
+	// written back. c is raw with defaults resolved, which is what the rest
+	// of mydb reads.
+	//
+	// Keeping them apart matters: saving the resolved copy would freeze
+	// every default into the file the first time you add a server through
+	// the GUI, and no later change to a default could ever reach you again.
+	raw Config
+	c   Config
 )
 
 // ErrNoSuchServer is returned when a server-name is not in the config.
@@ -64,11 +72,11 @@ func (d Duration) D() time.Duration {
 // against ~/.ssh/known_hosts.
 type SSH struct {
 	Host       string `toml:"host"`
-	User       string `toml:"user"`
-	Key        string `toml:"key"`
-	Passphrase string `toml:"passphrase"`
-	Pass       string `toml:"pass"`
-	Agent      bool   `toml:"agent"`
+	User       string `toml:"user,omitempty"`
+	Key        string `toml:"key,omitempty"`
+	Passphrase string `toml:"passphrase,omitempty"`
+	Pass       string `toml:"pass,omitempty"`
+	Agent      bool   `toml:"agent,omitempty"`
 }
 
 // Server is one MySQL server as reachable from mydb.
@@ -77,10 +85,10 @@ type Server struct {
 	SSH  *SSH   `toml:"ssh,omitempty"`
 	Name string `toml:"name"`
 	Host string `toml:"host"`
-	User string `toml:"user"`
-	Pass string `toml:"pass"`
+	User string `toml:"user,omitempty"`
+	Pass string `toml:"pass,omitempty"`
 	TLS  string `toml:"tls,omitempty"`
-	Port int    `toml:"port"`
+	Port int    `toml:"port,omitzero"`
 }
 
 // TLSNames are the accepted values of a server's tls setting.
@@ -119,16 +127,22 @@ func (s Server) Addr() string {
 
 // Timeout is the deadline-budget, every network operation draws from it.
 type Timeout struct {
-	SSHDial      Duration `toml:"ssh_dial"`
-	MySQLConnect Duration `toml:"mysql_connect"`
-	MetaQuery    Duration `toml:"meta_query"`
-	DataQuery    Duration `toml:"data_query"`
-	DDLQuery     Duration `toml:"ddl_query"`
-	SSHKeepalive Duration `toml:"ssh_keepalive"`
-	ConnLifetime Duration `toml:"conn_lifetime"`
-	IdleReap     Duration `toml:"idle_reap"`
-	HTTPReadHdr  Duration `toml:"http_read_hdr"`
-	HTTPIdle     Duration `toml:"http_idle"`
+	SSHDial      Duration `toml:"ssh_dial,omitzero"`
+	MySQLConnect Duration `toml:"mysql_connect,omitzero"`
+	MetaQuery    Duration `toml:"meta_query,omitzero"`
+	DataQuery    Duration `toml:"data_query,omitzero"`
+	// DDLQuery is 0 by default, meaning no deadline. A deadline bounds
+	// work that might never finish; an ALTER TABLE will finish, and
+	// killing it half-way through a table rebuild throws away the work
+	// done so far and then makes you wait for the rollback. What can hang
+	// forever is the metadata lock it needs to start, and that is bounded
+	// by MySQL.LockWait instead.
+	DDLQuery     Duration `toml:"ddl_query,omitzero"`
+	SSHKeepalive Duration `toml:"ssh_keepalive,omitzero"`
+	ConnLifetime Duration `toml:"conn_lifetime,omitzero"`
+	IdleReap     Duration `toml:"idle_reap,omitzero"`
+	HTTPReadHdr  Duration `toml:"http_read_hdr,omitzero"`
+	HTTPIdle     Duration `toml:"http_idle,omitzero"`
 }
 
 // DefaultSQLMode is the session sql_mode mydb connects with unless the
@@ -141,11 +155,23 @@ type Timeout struct {
 // hold. Strict mode turns that into an error you can see.
 const DefaultSQLMode = "STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION"
 
+// DefaultLockWait bounds how long a statement waits for a metadata lock.
+//
+// This is the deadline that actually matters for DDL. MySQL ships with
+// lock_wait_timeout at a year and MariaDB at a day, so an ALTER that cannot
+// get its lock queues behind whatever holds it — and every read and write
+// of that table then queues behind the ALTER. Failing in half a minute with
+// "Lock wait timeout exceeded" is much kinder than taking the table down.
+const DefaultLockWait = 30 * time.Second
+
 // MySQL holds settings applied to every MySQL session.
 type MySQL struct {
 	// SQLMode is the session sql_mode. Unset means DefaultSQLMode; set it
 	// to "" to inherit whatever the server's global mode happens to be.
 	SQLMode *string `toml:"sql_mode,omitempty"`
+	// LockWait is the session lock_wait_timeout. Unset means
+	// DefaultLockWait; set it to "0s" to leave the server's own value.
+	LockWait *Duration `toml:"lock_wait_timeout,omitzero"`
 }
 
 // Mode returns the configured sql_mode, or the strict default.
@@ -156,12 +182,46 @@ func (m MySQL) Mode() string {
 	return *m.SQLMode
 }
 
+// LockWaitSeconds returns the lock_wait_timeout to set, or 0 to leave the
+// server's own value alone. MySQL takes this variable in whole seconds.
+func (m MySQL) LockWaitSeconds() int {
+	if m.LockWait == nil {
+		return int(DefaultLockWait / time.Second)
+	}
+	return int(m.LockWait.D() / time.Second)
+}
+
 // Config is the whole config-file.
+//
+// Timeout and MySQL are pointers so that a file which never mentioned them
+// is written back without them, rather than sprouting a full set of
+// materialised defaults.
 type Config struct {
-	Listen  string   `toml:"listen"`
+	Timeout *Timeout `toml:"timeout,omitempty"`
+	MySQL   *MySQL   `toml:"mysql,omitempty"`
+	Listen  string   `toml:"listen,omitempty"`
 	Server  []Server `toml:"server"`
-	Timeout Timeout  `toml:"timeout"`
-	MySQL   MySQL    `toml:"mysql"`
+}
+
+// resolve returns a deep copy of r with every default filled in.
+func resolve(r Config) Config {
+	e := Config{Listen: r.Listen}
+
+	t := Timeout{}
+	if r.Timeout != nil {
+		t = *r.Timeout
+	}
+	m := MySQL{}
+	if r.MySQL != nil {
+		m = *r.MySQL
+	}
+	e.Timeout, e.MySQL = &t, &m
+
+	e.Server = make([]Server, len(r.Server))
+	copy(e.Server, r.Server)
+
+	e.defaults()
+	return e
 }
 
 // defaults fills in every field the config-file left empty.
@@ -169,7 +229,7 @@ func (c *Config) defaults() {
 	if c.Listen == "" {
 		c.Listen = "localhost:9999"
 	}
-	t := &c.Timeout
+	t := c.Timeout
 	for _, d := range []struct {
 		p   *Duration
 		def time.Duration
@@ -178,7 +238,9 @@ func (c *Config) defaults() {
 		{&t.MySQLConnect, 5 * time.Second},
 		{&t.MetaQuery, 5 * time.Second},
 		{&t.DataQuery, 30 * time.Second},
-		{&t.DDLQuery, 60 * time.Second},
+		// Deliberately 0: see the field comment. A ten-minute ALTER is
+		// slow, not hung.
+		{&t.DDLQuery, 0},
 		{&t.SSHKeepalive, 15 * time.Second},
 		{&t.ConnLifetime, 5 * time.Minute},
 		{&t.IdleReap, 10 * time.Minute},
@@ -223,6 +285,14 @@ func SQLMode() string {
 	return c.MySQL.Mode()
 }
 
+// LockWait returns the session lock_wait_timeout in seconds, 0 to leave the
+// server's own value.
+func LockWait() int {
+	mu.RLock()
+	defer mu.RUnlock()
+	return c.MySQL.LockWaitSeconds()
+}
+
 // Open reads the config-file, applies defaults and validates it.
 func Open(f string) error {
 	abs, e := filepath.Abs(f)
@@ -239,21 +309,22 @@ func Open(f string) error {
 		log.Printf("WARN config.Open: %s is mode %04o, it holds cleartext passwords, chmod 0600 it", abs, m)
 	}
 
-	var n Config
-	if _, e := toml.DecodeFile(abs, &n); e != nil {
+	var r Config
+	if _, e := toml.DecodeFile(abs, &r); e != nil {
 		return fmt.Errorf("config.Open TOML: %w", e)
 	}
-	n.defaults()
+	n := resolve(r)
 	if e := n.validate(); e != nil {
 		return e
 	}
 
 	mu.Lock()
-	c = n
+	raw, c = r, n
 	mu.Unlock()
 
 	if Verbose {
-		log.Printf("config.Open %s servers=%d listen=%s", abs, len(n.Server), n.Listen)
+		log.Printf("config.Open %s servers=%d listen=%s ddl_query=%s",
+			abs, len(n.Server), n.Listen, n.Timeout.DDLQuery.D())
 	}
 	return nil
 }
@@ -262,17 +333,14 @@ func Open(f string) error {
 func Get() Config {
 	mu.RLock()
 	defer mu.RUnlock()
-	out := c
-	out.Server = make([]Server, len(c.Server))
-	copy(out.Server, c.Server)
-	return out
+	return resolve(raw)
 }
 
 // Timeouts returns the deadline-budget.
 func Timeouts() Timeout {
 	mu.RLock()
 	defer mu.RUnlock()
-	return c.Timeout
+	return *c.Timeout
 }
 
 // Listen returns the HTTP listen-address from the config-file.
@@ -307,14 +375,15 @@ func ServerByName(name string) (Server, error) {
 func AddServer(s Server) error {
 	mu.Lock()
 	defer mu.Unlock()
-	for _, o := range c.Server {
+	for _, o := range raw.Server {
 		if o.Name == s.Name {
 			return fmt.Errorf("%w: %s", ErrDuplicateServer, s.Name)
 		}
 	}
-	c.Server = append(c.Server, s)
-	if e := c.validate(); e != nil {
-		c.Server = c.Server[:len(c.Server)-1]
+	raw.Server = append(raw.Server, s)
+	if e := commit(); e != nil {
+		raw.Server = raw.Server[:len(raw.Server)-1]
+		_ = commit() //nolint:errcheck // restoring a config that already validated
 		return e
 	}
 	return save()
@@ -325,7 +394,7 @@ func UpdateServer(orig string, s Server) error {
 	mu.Lock()
 	defer mu.Unlock()
 	idx := -1
-	for i, o := range c.Server {
+	for i, o := range raw.Server {
 		if o.Name == orig {
 			idx = i
 			break
@@ -335,16 +404,17 @@ func UpdateServer(orig string, s Server) error {
 		return fmt.Errorf("%w: %s", ErrNoSuchServer, orig)
 	}
 	if s.Name != orig {
-		for _, o := range c.Server {
+		for _, o := range raw.Server {
 			if o.Name == s.Name {
 				return fmt.Errorf("%w: %s", ErrDuplicateServer, s.Name)
 			}
 		}
 	}
-	old := c.Server[idx]
-	c.Server[idx] = s
-	if e := c.validate(); e != nil {
-		c.Server[idx] = old
+	old := raw.Server[idx]
+	raw.Server[idx] = s
+	if e := commit(); e != nil {
+		raw.Server[idx] = old
+		_ = commit() //nolint:errcheck // restoring a config that already validated
 		return e
 	}
 	return save()
@@ -354,13 +424,26 @@ func UpdateServer(orig string, s Server) error {
 func DeleteServer(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
-	for i, o := range c.Server {
+	for i, o := range raw.Server {
 		if o.Name == name {
-			c.Server = append(c.Server[:i], c.Server[i+1:]...)
+			raw.Server = append(raw.Server[:i], raw.Server[i+1:]...)
+			if e := commit(); e != nil {
+				return e
+			}
 			return save()
 		}
 	}
 	return fmt.Errorf("%w: %s", ErrNoSuchServer, name)
+}
+
+// commit re-resolves raw into the live config. Caller holds mu.
+func commit() error {
+	n := resolve(raw)
+	if e := n.validate(); e != nil {
+		return e
+	}
+	c = n
+	return nil
 }
 
 // save atomically rewrites Path, keeping the previous file as .bak.
@@ -376,7 +459,7 @@ func save() error {
 		return fmt.Errorf("config.save create: %w", e)
 	}
 
-	if e := toml.NewEncoder(f).Encode(c); e != nil {
+	if e := toml.NewEncoder(f).Encode(raw); e != nil {
 		if e := f.Close(); e != nil {
 			log.Printf("config.save close after encode-fail: %s", e)
 		}
@@ -408,7 +491,7 @@ func save() error {
 		return fmt.Errorf("config.save rename: %w", e)
 	}
 	if Verbose {
-		log.Printf("config.save wrote %s servers=%d", Path, len(c.Server))
+		log.Printf("config.save wrote %s servers=%d", Path, len(raw.Server))
 	}
 	return nil
 }

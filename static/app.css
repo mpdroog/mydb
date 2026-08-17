@@ -101,6 +101,33 @@ input:focus, textarea:focus, button:focus-visible {
 .dot.error { background: var(--err); }
 @keyframes pulse { 50% { opacity: .3; } }
 
+/* Flavor badge. A wordmark, not the official logo: MySQL and MariaDB are
+   trademarks and a 14px redrawing of either would be a poor likeness. The
+   brand colours plus a two-letter mark are unambiguous at this size. */
+.flavor {
+  flex: none;
+  width: 19px;
+  height: 13px;
+  line-height: 13px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: -.2px;
+  color: #fff;
+  font-family: var(--mono);
+  user-select: none;
+}
+.flavor.mysql   { background: #00758f; }   /* MySQL teal   */
+.flavor.mariadb { background: #c0765a; }   /* MariaDB clay */
+.flavor.none    { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+
+/* Encoding labels. Muted on a database (it is just information); coloured on
+   a table only when it disagrees with the database it lives in. */
+.sub.enc { font-family: var(--mono); font-size: 10px; }
+.sub.enc.warn { color: var(--warn); }
+.sub.enc.bad  { color: var(--err); font-weight: 600; }
+
 .node .act {
   display: none;
   background: none;

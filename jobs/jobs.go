@@ -66,12 +66,13 @@ type Request struct {
 
 // Event is one SSE message about a job.
 type Event struct {
-	Job      string `json:"job"`
-	State    State  `json:"state"`
-	Error    string `json:"error,omitempty"`
-	Elapsed  int64  `json:"elapsed_ms"`
-	Rows     int    `json:"rows"`
-	Affected int64  `json:"affected"`
+	Job      string   `json:"job"`
+	State    State    `json:"state"`
+	Error    string   `json:"error,omitempty"`
+	Progress Progress `json:"progress"`
+	Elapsed  int64    `json:"elapsed_ms"`
+	Rows     int      `json:"rows"`
+	Affected int64    `json:"affected"`
 }
 
 // Job is one submitted statement and its result.
@@ -92,6 +93,7 @@ type Job struct {
 
 	sql      string
 	pk       []string
+	progress Progress
 	state    State
 	connID   uint64
 	affected int64
@@ -213,7 +215,19 @@ func (m *Manager) Get(id string) (*Job, error) {
 func (m *Manager) run(j *Job) {
 	defer m.wg.Done()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout(j.Kind))
+	// A zero budget means no deadline, which is the default for DDL: a
+	// table rebuild is slow rather than hung, and cutting it off loses the
+	// work and then charges you for the rollback. Such a job ends when it
+	// finishes or when you cancel it.
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if d := timeout(j.Kind); d > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), d)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 	defer cancel()
 
 	j.mu.Lock()
@@ -335,6 +349,13 @@ func (m *Manager) exec(ctx context.Context, j *Job) error {
 	j.mu.Lock()
 	j.connID = connID
 	j.mu.Unlock()
+
+	// Now that the connection is known, watch what the server says it is
+	// doing. Without this a ten-minute ALTER is indistinguishable from a
+	// hang, which is the whole reason a deadline felt necessary.
+	pctx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go m.watchProgress(pctx, j)
 
 	if j.DB != "" {
 		qdb, e := meta.QuoteIdent(j.DB)
@@ -554,6 +575,7 @@ type Snapshot struct {
 	SQL        string       `json:"sql"`
 	State      State        `json:"state"`
 	Error      string       `json:"error,omitempty"`
+	Progress   Progress     `json:"progress"`
 	PrimaryKey []string     `json:"primary_key,omitempty"`
 	Elapsed    int64        `json:"elapsed_ms"`
 	Rows       int          `json:"rows"`
@@ -579,6 +601,7 @@ func (j *Job) snapshotLocked() Snapshot {
 		Result:     j.result,
 		Affected:   j.affected,
 		PrimaryKey: j.pk,
+		Progress:   j.progress,
 	}
 	if j.err != nil {
 		s.Error = j.err.Error()
@@ -623,7 +646,15 @@ func (j *Job) eventLocked() Event {
 		Elapsed:  s.Elapsed,
 		Rows:     s.Rows,
 		Affected: s.Affected,
+		Progress: s.Progress,
 	}
+}
+
+// setProgress records what the server last said about this statement.
+func (j *Job) setProgress(p Progress) {
+	j.mu.Lock()
+	j.progress = p
+	j.mu.Unlock()
 }
 
 // emit publishes the job's current state to its subscribers.
@@ -668,12 +699,20 @@ func (m *Manager) gcOnce() {
 	}
 }
 
-// Forget drops a job right now, used when the browser closes its tab.
+// Forget drops a finished job's buffered result, used when the browser
+// closes its tab.
+//
+// A job that is still running is kept: dropping it would leave a statement
+// working on the server with nothing able to report on it or cancel it,
+// which is exactly the wrong thing to do to a ten-minute ALTER whose tab
+// was closed by accident.
 func (m *Manager) Forget(id string) {
 	m.mu.Lock()
 	j, ok := m.jobs[id]
-	if ok {
+	if ok && j.Finished() {
 		delete(m.jobs, id)
+	} else {
+		ok = false
 	}
 	m.mu.Unlock()
 	if ok {

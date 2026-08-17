@@ -80,5 +80,19 @@ export function fmtNum(n) {
 
 export function fmtMs(ms) {
   if (ms < 1000) return ms + 'ms';
-  return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + 's';
+  if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + 's';
+  const s = Math.round(ms / 1000);
+  return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
+}
+
+// fmtProgress turns what the server said it is doing into a line worth
+// reading. MariaDB reports a stage and a percentage for a table rebuild;
+// MySQL reports only the state, so both shapes have to render.
+export function fmtProgress(p) {
+  if (!p) return '';
+  const bits = [];
+  if (p.stage && p.max_stage) bits.push('stage ' + p.stage + '/' + p.max_stage);
+  if (typeof p.percent === 'number' && p.percent >= 0) bits.push(p.percent.toFixed(1) + '%');
+  if (p.state) bits.push(p.state);
+  return bits.join(' · ');
 }
