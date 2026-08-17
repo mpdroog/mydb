@@ -53,6 +53,7 @@ export const api = {
 
   databases: (server, signal) => req('GET', '/databases?' + qs({ server }), undefined, signal),
   tables: (server, db, signal) => req('GET', '/tables?' + qs({ server, db }), undefined, signal),
+  erm: (server, db, signal) => req('GET', '/erm?' + qs({ server, db }), undefined, signal),
   structure: (server, db, table, signal) => req('GET', '/structure?' + qs({ server, db, table }), undefined, signal),
 
   submit: (r, signal) => req('POST', '/query', r, signal),

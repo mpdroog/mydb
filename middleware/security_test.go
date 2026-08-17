@@ -120,3 +120,50 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Error("missing nosniff")
 	}
 }
+
+// TestTypedInURL pins the one relaxation of the X-Mydb rule: a GET that the
+// browser itself marks as a top-level navigation. Sec-Fetch-* are forbidden
+// header names, so page JavaScript cannot forge them.
+func TestTypedInURL(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		method string
+		hdr    map[string]string
+		want   int
+	}{
+		{name: "address bar", method: http.MethodGet, want: 200,
+			hdr: map[string]string{"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"}},
+
+		// evil.com cannot claim to be a navigation: the browser stamps it.
+		{name: "cross-site fetch", method: http.MethodGet, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}},
+		{name: "cross-site pretending to navigate", method: http.MethodGet, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}},
+		{name: "same-origin fetch still needs the header", method: http.MethodGet, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors"}},
+
+		// The relaxation is GET-only, so nothing that writes is covered.
+		{name: "navigation POST", method: http.MethodPost, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"}},
+		{name: "navigation DELETE", method: http.MethodDelete, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"}},
+
+		// A client that sends no Sec-Fetch headers is unchanged.
+		{name: "curl without the header", method: http.MethodGet, want: 403},
+		{name: "half the signal is not enough", method: http.MethodGet, want: 403,
+			hdr: map[string]string{"Sec-Fetch-Site": "none"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequestWithContext(t.Context(), c.method, "/api/v1/erm?db=x", nil)
+			r.Host = "localhost:9999"
+			for k, v := range c.hdr {
+				r.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			CSRFHeader(ok).ServeHTTP(w, r)
+			if w.Code != c.want {
+				t.Errorf("got %d, want %d", w.Code, c.want)
+			}
+		})
+	}
+}

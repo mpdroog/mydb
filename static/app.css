@@ -317,6 +317,57 @@ pre.sql {
   overflow: auto;
 }
 
+/* ---------- ERM diagram ---------- */
+
+.erm-pane { grid-template-rows: auto 1fr auto; }
+.erm-canvas { overflow: hidden; background: var(--bg); cursor: grab; min-height: 0; }
+.erm-canvas:focus { outline: none; }
+.zoom-pct { min-width: 52px; font-variant-numeric: tabular-nums; }
+.erm-canvas.dragging { cursor: grabbing; }
+.erm-svg { display: block; width: 100%; height: 100%; user-select: none; }
+
+.erm-box { fill: var(--bg2); stroke: #39404e; }
+.erm-head { fill: #2b313d; }
+.erm-title { fill: var(--fg); font: 600 12px system-ui, sans-serif; }
+.erm-col { fill: #9aa3b2; font: 11px var(--mono); }
+.erm-col-pk { fill: var(--accent); }
+.erm-col-fk { fill: #c3cbd8; }
+.erm-more { fill: var(--fg2); font-style: italic; }
+.erm-node { cursor: pointer; }
+.erm-node:hover .erm-box { stroke: var(--accent); }
+.erm-view .erm-box { stroke-dasharray: 4 3; }
+
+.erm-edge { stroke: #7f8899; stroke-width: 1.3; fill: none; }
+/* A guess must never look like a declared constraint. */
+.erm-guess { stroke: #8a7f5f; stroke-dasharray: 5 4; }
+
+.erm-group-bg { fill: #1a1d24; stroke: var(--line); }
+.erm-group-component { stroke: #3a4658; }
+.erm-group-hub { stroke: #5a4a3a; }
+.erm-group-prefix { stroke: #3a5044; }
+.erm-group-label { fill: var(--fg2); font: 10px var(--mono); letter-spacing: .5px; }
+
+/* A copy kept aside: present, but not competing for attention. */
+.erm-backup .erm-box { stroke-dasharray: 2 3; opacity: .55; }
+.erm-backup .erm-title { opacity: .55; }
+
+/* A guess whose column types disagree: a real link and a real latent bug. */
+.erm-smell { stroke: var(--err); }
+
+.link-btn {
+  background: none; border: 0; padding: 0;
+  color: var(--warn); text-decoration: underline; font: inherit;
+}
+.link-btn:hover { background: none; color: var(--err); }
+
+/* Focus mode: everything unrelated recedes so one table can be read. */
+.erm-focused .erm-node { opacity: .22; }
+.erm-focused .erm-node.lit { opacity: 1; }
+.erm-focused .erm-edge { opacity: .12; }
+.erm-focused .erm-edge.lit { opacity: 1; stroke: var(--accent); stroke-width: 2; }
+
+.pane-head label { display: flex; align-items: center; gap: 4px; }
+
 /* ---------- modal ---------- */
 
 .modal {

@@ -58,6 +58,13 @@ func deny(w http.ResponseWriter, r *http.Request, why string) {
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		// Embedded files carry no modtime, so they reach the browser with
+		// neither ETag nor Last-Modified and get cached on a guess. That
+		// makes "I rebuilt and nothing changed" a real possibility, which
+		// is a miserable thing to debug.
+		if strings.HasPrefix(r.URL.Path, "/static/") {
+			h.Set("Cache-Control", "no-cache")
+		}
 		h.Set("Content-Security-Policy", CSPHeader)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
@@ -127,7 +134,7 @@ func CSRFHeader(next http.Handler) http.Handler {
 			deny(w, r, "CORS preflight")
 			return
 		}
-		if r.Header.Get(CSRFToken) == "" {
+		if r.Header.Get(CSRFToken) == "" && !typedInURL(r) {
 			deny(w, r, "missing "+CSRFToken+" header")
 			return
 		}
@@ -151,6 +158,24 @@ func WriteDeadline(d time.Duration) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// typedInURL reports whether this looks like a URL the operator typed into
+// the address bar, which is worth allowing without the X-Mydb header:
+// pasting an /api/ URL to look at a schema is a reasonable thing to do.
+//
+// It is safe because Sec-Fetch-* are forbidden header names. A browser sets
+// them itself and page JavaScript cannot override them, so evil.com cannot
+// dress a cross-origin fetch up as a navigation: it would carry
+// Sec-Fetch-Site: cross-site. A rebound DNS name gets same-origin, but
+// HostCheck has already refused that request. Anything that sends no
+// Sec-Fetch headers at all -- curl, a script -- still needs X-Mydb.
+//
+// Restricted to GET navigations, so nothing that changes state is covered.
+func typedInURL(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		r.Header.Get("Sec-Fetch-Site") == "none" &&
+		r.Header.Get("Sec-Fetch-Mode") == "navigate"
 }
 
 // originIsSelf reports whether an Origin header points back at us.

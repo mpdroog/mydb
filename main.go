@@ -82,6 +82,7 @@ func main() {
 	router.GET("/api/v1/databases", a.Databases)
 	router.GET("/api/v1/tables", a.Tables)
 	router.GET("/api/v1/structure", a.Structure)
+	router.GET("/api/v1/erm", a.ERM)
 
 	router.POST("/api/v1/query", a.QuerySubmit)
 	router.GET("/api/v1/jobs/:id", a.JobResult)

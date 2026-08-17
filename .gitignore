@@ -1,4 +1,6 @@
 mydb
-config.toml
-config.toml.bak
-config.toml.tmp
+
+# Every config variant holds cleartext passwords. Glob rather than list:
+# config.toml, .bak, .tmp, .prod, and whatever the next one is called.
+# config.example.toml does not match this and stays tracked.
+config.toml*

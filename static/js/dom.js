@@ -21,6 +21,25 @@ export function h(tag, props, ...kids) {
   return el;
 }
 
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+// svg builds an SVG element. Separate from h() because SVG needs
+// createElementNS -- createElement would produce an HTML element of the
+// same name, which renders as nothing at all inside an <svg>.
+export function svg(tag, props, ...kids) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, String(v));
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
