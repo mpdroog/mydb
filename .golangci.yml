@@ -1,0 +1,70 @@
+version: "2"
+
+# Strict on purpose. The rule this config exists to enforce: no error is
+# ever ignored. Every error is returned to the caller or logged, there is
+# no third option.
+
+linters:
+  enable:
+    - errcheck        # unchecked errors
+    - staticcheck     # comprehensive static analysis (includes gosimple)
+    - unused          # unused code
+    - govet           # suspicious constructs
+    - ineffassign     # assignments never used
+    - bodyclose       # unclosed HTTP response bodies
+    - errorlint       # error wrapping issues
+    - gocritic        # opinionated style checks
+    - misspell        # common spelling mistakes
+    - unconvert       # unnecessary type conversions
+    - unparam         # unused function parameters
+    - nakedret        # naked returns in long functions
+    - noctx           # HTTP requests without context
+    - reassign        # reassignment of top-level variables
+    - asasalint       # pass []any as any in variadic params
+    - bidichk         # dangerous unicode bidi characters
+    - durationcheck   # incorrect duration multiplication
+    - copyloopvar     # loop variable capture
+    - makezero        # slice zero-length init with append
+    - nilerr          # returning nil with non-nil error
+    - nosprintfhostport # misuse of Sprintf for host:port
+    - predeclared     # shadowing predeclared identifiers
+    - wastedassign    # wasted assignments
+    - gosec           # security issues
+    - forcetypeassert # forced type assertions
+    - usetesting      # use testing helpers
+    - prealloc        # slice pre-allocation opportunities
+    - gocheckcompilerdirectives # valid go compiler directives
+    - dupword         # duplicate words in source
+    - recvcheck       # receiver type consistency
+    # database/context specific, mydb lives or dies by these:
+    - sqlclosecheck   # *sql.Rows / *sql.Stmt closed on every path
+    - rowserrcheck    # rows.Err() checked after every iteration
+    - contextcheck    # never drop a context on the floor
+    - errchkjson      # unhandled json encode errors
+    - nilnil          # no (nil, nil) returns
+    - containedctx    # no context.Context stashed in a struct
+    - fatcontext      # no context built up inside a loop
+    - errname         # error vars/types named correctly
+
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+  errcheck:
+    check-type-assertions: true
+    check-blank: true      # `_ = f()` is an error, not an escape hatch
+    exclude-functions: []  # nothing gets a free pass
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment   # readability of the JSON structs wins here
+  nakedret:
+    max-func-lines: 0    # disallow naked returns in any function
+  gosec:
+    excludes: []         # no blanket excludes, suppress at the line with a reason
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

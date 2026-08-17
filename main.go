@@ -1,0 +1,145 @@
+// mydb serves a browser GUI for managing MySQL servers on localhost.
+//
+// It is a single binary: the GUI is embedded, the servers come from a TOML
+// file next to it, and anything behind a bastion is reached over an
+// in-process SSH tunnel that opens no local port.
+package main
+
+import (
+	"context"
+	"embed"
+	"flag"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/julienschmidt/httprouter"
+	"github.com/mpdroog/mydb/api"
+	"github.com/mpdroog/mydb/config"
+	"github.com/mpdroog/mydb/connman"
+	"github.com/mpdroog/mydb/jobs"
+	"github.com/mpdroog/mydb/middleware"
+)
+
+//go:embed static
+var static embed.FS
+
+// writeDeadline is the ceiling for an ordinary response. SSE handlers push
+// it further out on every event, which is why http.Server.WriteTimeout is
+// left at 0 instead: a global one would cut long-lived streams.
+const writeDeadline = 90 * time.Second
+
+// shutdownGrace is how long in-flight requests get on Ctrl-C.
+const shutdownGrace = 5 * time.Second
+
+func main() {
+	var configPath string
+	flag.BoolVar(&config.Verbose, "v", false, "Verbose-mode (log every request)")
+	flag.StringVar(&configPath, "c", "./config.toml", "Config-file")
+	listen := flag.String("h", "", "HTTP listen-address (overrides config-file)")
+	flag.Parse()
+
+	dir, e := os.Getwd()
+	if e != nil {
+		log.Fatal(e)
+	}
+	config.CurDir = dir
+
+	if e := config.Open(configPath); e != nil {
+		log.Fatal(e)
+	}
+
+	addr := config.Listen()
+	if *listen != "" {
+		addr = *listen
+	}
+
+	cm := connman.New()
+	jm := jobs.New(cm)
+	a := api.New(cm, jm)
+
+	assets, e := fs.Sub(static, "static")
+	if e != nil {
+		log.Fatal(e)
+	}
+
+	router := httprouter.New()
+	router.GET("/", redirect)
+	router.ServeFiles("/static/*filepath", http.FS(assets))
+
+	router.GET("/api/v1/servers", a.ServerList)
+	router.POST("/api/v1/servers", a.ServerAdd)
+	router.PUT("/api/v1/servers/:name", a.ServerUpdate)
+	router.DELETE("/api/v1/servers/:name", a.ServerDelete)
+	router.POST("/api/v1/servers/:name/connect", a.ServerConnect)
+	router.POST("/api/v1/servers/:name/disconnect", a.ServerDisconnect)
+	router.GET("/api/v1/status/events", a.StatusEvents)
+
+	router.GET("/api/v1/databases", a.Databases)
+	router.GET("/api/v1/tables", a.Tables)
+	router.GET("/api/v1/structure", a.Structure)
+
+	router.POST("/api/v1/query", a.QuerySubmit)
+	router.GET("/api/v1/jobs/:id", a.JobResult)
+	router.GET("/api/v1/jobs/:id/events", a.JobEvents)
+	router.POST("/api/v1/jobs/:id/cancel", a.JobCancel)
+	router.DELETE("/api/v1/jobs/:id", a.JobForget)
+
+	router.POST("/api/v1/alter", a.Alter)
+	router.PATCH("/api/v1/row", a.RowUpdate)
+
+	// Outermost first: log, then prove the request is ours, then set the
+	// response deadline, then the security headers everything inherits.
+	var h http.Handler = router
+	h = middleware.SecurityHeaders(h)
+	h = middleware.WriteDeadline(writeDeadline)(h)
+	h = middleware.CSRFHeader(h)
+	h = middleware.LocalOnly(h)
+	h = middleware.HostCheck(h)
+	h = middleware.HTTPLog(h)
+
+	t := config.Timeouts()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: t.HTTPReadHdr.D(),
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       t.HTTPIdle.D(),
+		// No WriteTimeout: deadlines are set per-request instead, so SSE
+		// streams can outlive an ordinary response.
+		WriteTimeout: 0,
+		ErrorLog:     log.Default(),
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("mydb listening on http://%s (config %s)", addr, config.Path)
+		if e := srv.ListenAndServe(); e != nil && e != http.ErrServerClosed {
+			log.Fatal(e)
+		}
+	}()
+
+	<-stop
+	log.Print("mydb shutting down")
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if e := srv.Shutdown(ctx); e != nil {
+		log.Printf("main shutdown: %s", e)
+	}
+	jm.Close()
+	cm.Close()
+}
+
+// redirect sends / to the GUI. Pointing at the directory rather than
+// index.html avoids http.FileServer's own canonical-path redirect on top
+// of ours.
+func redirect(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	http.Redirect(w, r, "/static/", http.StatusSeeOther)
+}

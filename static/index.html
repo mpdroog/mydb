@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mydb</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div id="app">
+  <aside id="sidebar">
+    <header class="side-head">
+      <input id="filter" type="search" placeholder="Filter (/)" autocomplete="off" spellcheck="false">
+      <button id="add-server" type="button" title="Add server">+</button>
+    </header>
+    <nav id="tree" aria-label="Servers"></nav>
+    <footer class="side-foot">
+      <button id="open-sql" type="button" title="New SQL console">SQL</button>
+      <span id="hint">Ctrl+K</span>
+    </footer>
+  </aside>
+
+  <main id="main">
+    <div id="tabbar" role="tablist"></div>
+    <div id="panes"></div>
+  </main>
+</div>
+
+<div id="modal" class="modal" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

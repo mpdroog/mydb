@@ -1,0 +1,59 @@
+# mydb config. Copy to config.toml and chmod 0600 it, the MySQL and SSH
+# passwords are stored in cleartext.
+#
+#   cp config.example.toml config.toml && chmod 0600 config.toml
+#
+# devnote: the GUI rewrites this file when you add/edit/remove a server,
+# which drops these comments. The previous version is kept as config.toml.bak.
+
+listen = "localhost:9999"
+
+# Every network operation draws its deadline from here. Nothing in mydb is
+# allowed to hang, so raise these rather than removing them.
+[timeout]
+ssh_dial      = "5s"    # TCP + SSH handshake to the bastion
+mysql_connect = "5s"    # MySQL handshake once the tunnel is up
+meta_query    = "5s"    # database/table/structure lookups
+data_query    = "30s"   # grid loads and console queries
+ddl_query     = "60s"   # ALTER TABLE
+ssh_keepalive = "15s"   # how fast a dead tunnel is noticed
+conn_lifetime = "5m"    # recycle pooled MySQL connections
+idle_reap     = "10m"   # close tunnel + pool after this much idle time
+http_read_hdr = "5s"
+http_idle     = "60s"
+
+# A plain local server.
+[[server]]
+name = "local"
+host = "127.0.0.1"
+port = 3306
+user = "root"
+pass = ""
+
+# A server behind a bastion. host/port are resolved on the SSH host, so
+# 127.0.0.1 here means "localhost as the bastion sees it".
+#
+# The bastion's host key must already be in ~/.ssh/known_hosts: mydb will
+# not trust an unknown key. Run `ssh mp@bastion.example.com` once first.
+#[[server]]
+#name = "prod-eu"
+#host = "127.0.0.1"
+#port = 3306
+#user = "readonly"
+#pass = "hunter2"
+#
+#  [server.ssh]
+#  host  = "bastion.example.com:22"
+#  user  = "mp"
+#  agent = true                      # use SSH_AUTH_SOCK (preferred)
+#  #key        = "~/.ssh/id_ed25519" # or a key file
+#  #passphrase = ""                  # if the key is encrypted
+#  #pass       = ""                  # last resort: password auth
+
+# Session settings applied to every MySQL connection.
+[mysql]
+# Without STRICT_ALL_TABLES a server silently truncates on write: editing a
+# cell to a value too long for its column stores a cut-down version, still
+# reports one row affected, and the grid would show a value the database
+# does not hold. Set to "" to inherit the server's own global sql_mode.
+sql_mode = "STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION"
