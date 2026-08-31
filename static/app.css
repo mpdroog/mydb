@@ -216,6 +216,45 @@ input:focus, textarea:focus, button:focus-visible {
 
 /* ---------- grid ---------- */
 
+/* The wrapper owns the toolbar; only the .grid below it scrolls. */
+.gridwrap { display: grid; grid-template-rows: auto 1fr; min-height: 0; min-width: 0; }
+
+.grid-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.grid-tools button { font-size: 11px; padding: 2px 8px; }
+.grid-tools .gall {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* The global input rule up top is written for text fields; a checkbox has no
+   use for its border, radius and 3px/6px padding, and Chrome paints that
+   background straight over the widget. Undo it and let the browser draw its
+   own, at its own size -- pinning a width with border-box sizing on top of
+   that inherited padding is what leaves nothing to click. */
+.gsel {
+  flex: none;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .grid { position: relative; overflow: auto; min-height: 0; }
 .grid-head {
   position: sticky;
@@ -229,6 +268,9 @@ input:focus, textarea:focus, button:focus-visible {
 }
 .gh {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   padding: 3px 6px;
   border-right: 1px solid var(--line);
   font-weight: 600;
@@ -236,6 +278,8 @@ input:focus, textarea:focus, button:focus-visible {
   overflow: hidden;
   flex: none;
 }
+/* The name, not the tick box, is what gives way in a narrow column. */
+.gh > span:not(.rz) { overflow: hidden; text-overflow: ellipsis; }
 .gh .pk { color: var(--accent); }
 .gh .rz {
   position: absolute;

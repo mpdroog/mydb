@@ -57,6 +57,31 @@ export function toast(msg, kind = '') {
   return el;
 }
 
+// copyText puts a string on the clipboard and reports whether it landed.
+// The async clipboard API only exists in a secure context, and mydb is just
+// as likely to be reached over plain http on a LAN address, so the old
+// execCommand path is the fallback rather than a silent no-op.
+export function copyText(s) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(s);
+
+  return new Promise((resolve, reject) => {
+    const ta = h('textarea', { value: s, readOnly: true });
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    try {
+      if (document.execCommand('copy')) resolve();
+      else reject(new Error('the browser refused the copy'));
+    } catch (e) {
+      reject(e);
+    } finally {
+      ta.remove();
+    }
+  });
+}
+
 // modal shows a card and returns a close func. Esc and a backdrop click
 // both close it, so nothing can trap the keyboard.
 export function modal(title, bodyEl, footEls) {

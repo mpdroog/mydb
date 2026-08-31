@@ -22,8 +22,9 @@ window.fetch = (url, opts) => realFetch(String(url).startsWith('http') ? url : B
 window.AbortController = AbortController;
 window.TextDecoder = TextDecoder;
 // jsdom's localStorage is getter-only; jsdom already provides a working one.
+let clip = '';
 Object.defineProperty(window.navigator, 'clipboard', {
-  value: { writeText: async () => {} }, configurable: true,
+  value: { writeText: async (t) => { clip = String(t); } }, configurable: true,
 });
 
 // Make the page's globals visible to the modules we import here.
@@ -126,6 +127,55 @@ if (rows.length) {
   ok(nullCell.length > 0, 'NULL cells are marked .null and read "NULL"');
   ok($$('#panes .gc.bin').length > 0, 'binary cells are marked .bin');
 }
+
+console.log('--- copy the ticked columns as CSV ---');
+const tools = $('#panes .pane .grid-tools');
+const csvBtn = tools?.querySelector('button');
+const allBox = tools?.querySelector('.gall .gsel');
+const boxes = $$('#panes .pane .gh .gsel');
+ok(boxes.length === headers.length, 'every column header carries a tick box',
+   boxes.length + ' boxes for ' + headers.length + ' columns');
+ok(boxes.every((b) => b.checked), 'a fresh result starts with every column ticked');
+ok(/all \d+ columns/.test(tools?.textContent || ''), 'the toolbar says so',
+   JSON.stringify(tools?.textContent));
+
+click(allBox);
+ok(boxes.every((b) => !b.checked), 'the all box clears every column');
+ok(csvBtn.disabled === true, 'with nothing ticked there is nothing to copy');
+
+for (const name of ['id', 'client', 'notes']) click(boxes[headers.indexOf(name)]);
+ok(csvBtn.disabled === false, 'ticking a column arms the button');
+ok(/3 of \d+ columns/.test(tools.textContent), 'and the toolbar counts them',
+   JSON.stringify(tools.textContent));
+ok(allBox.indeterminate === true, 'a partial selection shows as indeterminate');
+
+clip = '';
+click(csvBtn);
+await sleep(50);
+// Records are split on CRLF, which is what separates them: the newline
+// living inside a value is a bare LF inside quotes and must not split a
+// record, or every CSV reader would see a sixth row.
+const csv = clip.split('\r\n');
+ok(csv[0] === 'id,client,notes', 'the header row is the ticked column names', csv[0]);
+ok(csv.length === 6, 'a header row and one line per row', csv.length + ' lines');
+ok(csv[1] === '5,"multi\nline",newline in value',
+   'a newline inside a value is quoted and stays inside its record', JSON.stringify(csv[1]));
+ok(csv[2] === "4,o'brien & co,quote in the name", 'an apostrophe needs no quoting', csv[2]);
+ok(/^3,,".*,.*"$/.test(csv[3]), 'a comma inside a value is quoted', csv[3]);
+ok(/^2,[^,"]*,$/.test(csv[4]), 'NULL is written as an empty field', csv[4]);
+ok(csv[5] === '1,acme,fine', 'and the last row is there too', csv[5]);
+
+clip = '';
+keys($('#panes .pane .grid'), { key: 'X', ctrlKey: true, shiftKey: true });
+await sleep(50);
+ok(clip.split('\r\n')[0] === 'id,client,notes', 'Ctrl+Shift+X copies the same CSV',
+   JSON.stringify(clip.slice(0, 40)));
+
+clip = '';
+click(allBox);
+ok(boxes.every((b) => b.checked), 'the all box ticks everything back on');
+ok(/all \d+ columns/.test(tools.textContent), 'and the toolbar agrees',
+   JSON.stringify(tools.textContent));
 
 console.log('--- flavor badge + encoding labels ---');
 const badge = $('#tree .node.server .flavor');

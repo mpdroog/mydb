@@ -38,7 +38,8 @@ and its process list, marks its own polling connection, and updates rows in
 place rather than rebuilding them under the cursor; the plan renderer reads
 both MySQL's and MariaDB's JSON, and refuses to "analyze" anything that
 writes; and completion offers tables for a prefix and that table's columns
-after a dot.
+after a dot; and the grid's column tick boxes drive the CSV copy, which
+quotes commas, quotes and newlines the way RFC 4180 asks.
 
 Nothing it runs writes to the database: the confirm-gate test points at a
 table that does not exist, since the gate fires before any database work.

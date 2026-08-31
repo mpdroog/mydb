@@ -147,6 +147,8 @@ Esc              cancel the running query
 ?                every shortcut, including these
 arrows           move around the grid
 Enter            edit the focused cell   ·   Ctrl+0 sets NULL
+Ctrl/Cmd+C       copy the focused cell
+Ctrl/Cmd+Shift+X copy the ticked columns as CSV
 ```
 
 `?` is the one to remember: the overlay is generated from the keymap
@@ -156,6 +158,13 @@ The structure editor never applies anything blind: it asks the server for a
 dry-run first and shows you the exact `ALTER TABLE` before running it. Column
 renames are tracked by identity rather than by name, so a rename is a
 `CHANGE COLUMN` and not a drop plus an add.
+
+Every column header carries a tick box, and **Copy CSV** above the grid puts
+the ticked columns on the clipboard with their names as the header row. It
+copies every loaded row, not only the ones the grid is currently drawing, and
+quotes by RFC 4180 — so a value holding a comma, a quote or a newline pastes
+into a spreadsheet as one field. `NULL` and the empty string both arrive as an
+empty field; CSV has no way to tell those apart.
 
 Inline row edits need a primary key; without one the grid is read-only. The
 `UPDATE` also carries the value the cell was showing (`col <=> ?`), so if

@@ -111,6 +111,7 @@ function bindKeys() {
   keymap.doc('enter', 'Edit the focused cell', 'Grid');
   keymap.doc('mod+0', 'Set the focused cell to NULL', 'Grid');
   keymap.doc('mod+c', 'Copy the focused cell', 'Grid');
+  keymap.doc('mod+shift+x', 'Copy the ticked columns as CSV, header row included', 'Grid');
   keymap.doc('pageup', 'Move a screen up · PageDown moves down', 'Grid');
   keymap.doc('home', 'First column · End is the last · Ctrl+Home the first row', 'Grid');
 
