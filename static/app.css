@@ -149,7 +149,17 @@ input:focus, textarea:focus, button:focus-visible {
 
 /* ---------- tabs ---------- */
 
-#main { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
+/* The column is minmax(0, 1fr), not the default auto: an auto column grows
+   to the max-content of the widest item, so a row of tabs would widen the
+   tab row past #main and shove the sidebar off the screen. Bounded here,
+   the tab bar scrolls inside itself instead. */
+#main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
 
 #tabrow {
   display: flex;

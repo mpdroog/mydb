@@ -63,7 +63,18 @@ export function activate(id) {
     if (on) active = t;
   }
   active?.api?.onShow?.();
-  active?.btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (active) keepVisible(active.btn);
+}
+
+// keepVisible scrolls the tab bar, and nothing but the tab bar, so the
+// active tab is in view. scrollIntoView() would also scroll every ancestor
+// up to the body, which clips its overflow: one such scroll and the sidebar
+// sits off-screen with no way left to scroll it back.
+function keepVisible(btn) {
+  const box = bar().getBoundingClientRect();
+  const tab = btn.getBoundingClientRect();
+  if (tab.left < box.left) bar().scrollLeft -= box.left - tab.left;
+  else if (tab.right > box.right) bar().scrollLeft += tab.right - box.right;
 }
 
 export function close(id) {
