@@ -1,43 +1,78 @@
-// tabs.js - the tabbed content pane.
+// tabs.js - the work strip.
 //
-// A tab owns an AbortController; closing one aborts every request it
-// started, which on the Go side also cancels the query it was waiting on.
+// Open work is the only navigation there is: no rail duplicating it, and
+// nothing to "go to" that is not already a chip. A chip owns an
+// AbortController, so closing one aborts every request it started, which
+// on the Go side also cancels the query it was waiting on.
+//
+// Each chip carries three things beyond its title: a three-letter kind, so
+// a table is told from a console without reading; its server's colour on
+// the left edge, so the same table on two servers is never picked by
+// mistake; and an amber kind while its job is still running.
+//
+// The strip also drives the window's own chrome. Whichever chip is in
+// front sets the hue on the top edge and whether the production hazard
+// stripe is showing, because that has to describe the work you are looking
+// at rather than the last server you happened to click.
 
 import { h, $, clear } from './dom.js';
+import { servers } from './state.js';
+import { paint } from './colour.js';
 
 const list = [];
 let active = null;
 let seq = 0;
 
-function bar() { return $('#tabbar'); }
+function bar() { return $('#chips'); }
 function panes() { return $('#panes'); }
 
-export function open({ key, title, build, danger }) {
+// KINDS maps a tab key's prefix to the label its chip wears. Derived from
+// the key so a caller that does not care gets a sensible one anyway.
+const KINDS = {
+  data: 'tbl', sql: 'sql', struct: 'ddl', dash: 'srv', erm: 'erm', qlog: 'log',
+};
+
+function kindOf(key, given) {
+  if (given) return given;
+  const head = String(key || '').split(':')[0];
+  return KINDS[head] || '';
+}
+
+export function open({ key, title, build, danger, server, kind }) {
   const found = list.find((t) => t.key === key && key);
   if (found) { activate(found.id); return found; }
 
   const id = 'tab' + (++seq);
-  // A pane belonging to a production server carries a red rule along its
-  // top edge. It is the one piece of chrome that is always in view while
-  // you work, which is the point.
   const pane = h('div', { class: 'pane' + (danger ? ' prod' : ''), hidden: true });
   const ctl = new AbortController();
 
-  const btn = h('div', { class: 'tab' + (danger ? ' prod' : ''), role: 'tab' },
-    h('span', { class: 'label', text: title }),
-    h('button', {
+  const label = h('span', { class: 'label', text: title });
+  const btn = h('button', {
+    class: 'chip',
+    type: 'button',
+    role: 'tab',
+    'aria-selected': 'false',
+  },
+    h('span', { class: 'kind', text: kindOf(key, kind) }),
+    label,
+    h('span', {
       class: 'x',
-      type: 'button',
+      role: 'button',
       title: 'Close',
       onclick: (ev) => { ev.stopPropagation(); close(id); },
     }, '×'),
   );
+  paint(btn, servers.get(server)?.colour);
+
   btn.addEventListener('mousedown', (ev) => {
     if (ev.button === 1) { ev.preventDefault(); close(id); }
-    else activate(id);
+  });
+  btn.addEventListener('click', (ev) => {
+    if (ev.target.classList.contains('x')) return;
+    activate(id);
   });
 
-  const tab = { id, key, title, btn, pane, ctl, api: null };
+  const tab = { id, key, title, btn, label, pane, ctl, server, danger, api: null };
   list.push(tab);
   bar().append(btn);
   panes().append(pane);
@@ -48,33 +83,50 @@ export function open({ key, title, build, danger }) {
   return tab;
 }
 
-// updateTools shows the close-all button only when there is more than one
-// tab to close, so it is not a permanent piece of furniture.
+// busy paints a chip's kind amber while its job runs, so the strip doubles
+// as the list of what is still in flight.
+export function busy(tab, on) {
+  tab?.btn?.classList.toggle('running', !!on);
+}
+
 function updateTools() {
   const btn = $('#close-all');
   if (btn) btn.hidden = list.length < 2;
+  const empty = $('#empty');
+  if (empty) empty.hidden = list.length > 0;
+  if (!list.length) chrome(null);
+}
+
+// chrome puts the server of whatever is in front onto the window: its hue
+// on the top edge, and the hazard stripe when it is production.
+function chrome(tab) {
+  const app = $('#app');
+  if (!app) return;
+  paint(app, tab ? servers.get(tab.server)?.colour : undefined);
+  app.dataset.prod = tab?.danger ? 'on' : 'off';
 }
 
 export function activate(id) {
   for (const t of list) {
     const on = t.id === id;
     t.pane.hidden = !on;
-    t.btn.classList.toggle('active', on);
+    t.btn.setAttribute('aria-selected', String(on));
     if (on) active = t;
   }
+  chrome(active);
   active?.api?.onShow?.();
   if (active) keepVisible(active.btn);
 }
 
-// keepVisible scrolls the tab bar, and nothing but the tab bar, so the
-// active tab is in view. scrollIntoView() would also scroll every ancestor
-// up to the body, which clips its overflow: one such scroll and the sidebar
-// sits off-screen with no way left to scroll it back.
+// keepVisible scrolls the strip, and nothing but the strip. scrollIntoView
+// would also scroll every ancestor up to the body, which clips its
+// overflow: one such scroll and the sidebar sits off-screen with no way
+// left to scroll it back.
 function keepVisible(btn) {
   const box = bar().getBoundingClientRect();
-  const tab = btn.getBoundingClientRect();
-  if (tab.left < box.left) bar().scrollLeft -= box.left - tab.left;
-  else if (tab.right > box.right) bar().scrollLeft += tab.right - box.right;
+  const chip = btn.getBoundingClientRect();
+  if (chip.left < box.left) bar().scrollLeft -= box.left - chip.left;
+  else if (chip.right > box.right) bar().scrollLeft += chip.right - box.right;
 }
 
 export function close(id) {
@@ -100,32 +152,29 @@ export function closeActive() {
   if (active) close(active.id);
 }
 
-// closeAll empties the tab bar.
+// closeAll empties the strip.
 //
-// Each tab is closed through close(), so every one of them disposes its
-// job and aborts its requests — which on the Go side cancels the query it
-// was waiting on. A schema change is the exception and detaches instead,
-// exactly as it does when you close its tab by hand.
+// Each chip is closed through close(), so every one disposes its job and
+// aborts its requests -- which on the Go side cancels the query it was
+// waiting on. A schema change is the exception and detaches instead,
+// exactly as it does when you close its chip by hand.
 export function closeAll() {
   for (const t of [...list]) close(t.id);
 }
 
-// count is how many tabs are open, for the confirmation on closing a lot
-// of them at once.
-export function count() {
-  return list.length;
-}
-
-export function current() {
-  return active;
-}
+export function count() { return list.length; }
+export function current() { return active; }
+export function all() { return [...list]; }
 
 export function rename(tab, title) {
   tab.title = title;
-  clear(tab.btn.querySelector('.label'));
-  tab.btn.querySelector('.label').textContent = title;
+  clear(tab.label);
+  tab.label.textContent = title;
 }
 
-export function all() {
-  return [...list];
+// repaint re-reads every chip's colour, for when the server list reloads
+// and a hue has been changed in the connection sheet.
+export function repaint() {
+  for (const t of list) paint(t.btn, servers.get(t.server)?.colour);
+  chrome(active);
 }

@@ -5,17 +5,19 @@
 
 import { $, toast } from './dom.js';
 import { api, aborted } from './api.js';
-import { setServers, watchStatus } from './state.js';
+import { setServers, watchStatus, servers } from './state.js';
 import * as sidebar from './sidebar.js';
 import * as tabs from './tabs.js';
+import { openTable } from './data.js';
+import { addServer, editServer, serverMenu } from './servers.js';
 import * as keymap from './keymap.js';
 import { openStructure } from './structure.js';
 import { openConsole } from './console.js';
 import { openPalette } from './palette.js';
 import { openDashboard } from './dashboard.js';
 import { openQueryLog } from './querylog.js';
+import { openERM } from './erm.js';
 import { openHelp } from './help.js';
-import { addServer } from './servers.js';
 
 // One controller for the page's lifetime, so a reload tears every stream
 // down cleanly.
@@ -25,6 +27,9 @@ async function reloadServers() {
   try {
     setServers(await api.servers(page.signal));
     sidebar.render();
+    // A hue may have changed in the connection sheet, and the chips and
+    // the window edge are drawn from it.
+    tabs.repaint();
   } catch (e) {
     if (!aborted(e)) toast('Could not load servers: ' + e.message, 'err');
   }
@@ -44,8 +49,12 @@ function bindKeys() {
     desc: 'Jump to a server, database or table',
   });
   keymap.bind('/', () => sidebar.focusFilter(), {
-    group: 'Navigate', desc: 'Focus the sidebar filter',
+    group: 'Navigate', desc: 'Find a table (the palette, already on tables)',
   });
+  keymap.bind('mod+backslash', () => {
+    const app = $('#app');
+    app.dataset.sidebar = app.dataset.sidebar === 'off' ? 'on' : 'off';
+  }, { inField: true, group: 'Navigate', desc: 'Show or hide the sidebar' });
   keymap.bind(['?', 'shift+?'], openHelp, {
     group: 'Navigate', desc: 'This list',
   });
@@ -136,23 +145,69 @@ function closeAll() {
 
 function wireChrome() {
   $('#add-server').addEventListener('click', () => addServer());
-  $('#open-sql').addEventListener('click', () => {
-    const c = context();
-    openConsole(c.server, c.db, '');
-  });
-  $('#open-qlog').addEventListener('click', () => openQueryLog({ server: context().server }));
+  $('#open-any').addEventListener('click', () => openPalette());
   $('#open-help').addEventListener('click', openHelp);
   $('#close-all').addEventListener('click', closeAll);
+
+  const grouping = $('#group-toggle');
+  grouping.addEventListener('click', () => {
+    const on = grouping.getAttribute('aria-pressed') !== 'true';
+    grouping.setAttribute('aria-pressed', String(on));
+    sidebar.setGrouping(on);
+  });
+
   document.addEventListener('mydb:servers-changed', reloadServers);
   window.addEventListener('beforeunload', () => page.abort());
 }
 
+// openSchemaFor picks a database to draw. The diagram is per-schema, and
+// a server-level menu item that asked "which one?" first would be a worse
+// answer than opening the obvious one.
+async function openSchemaFor(server) {
+  const c = sidebar.selection();
+  if (c.server === server && c.db) { openERM(server, c.db); return; }
+  try {
+    const dbs = await api.databases(server, page.signal);
+    const first = dbs.find((d) => !/^(information_schema|performance_schema|mysql|sys)$/.test(d.name));
+    if (!first) { toast('No schema to draw on ' + server); return; }
+    openERM(server, first.name);
+  } catch (e) {
+    if (!aborted(e)) toast(e.message, 'err');
+  }
+}
+
+// tunnel says how the sidebar's footer describes the connections: how many
+// are dialled through SSH, since that is the thing worth knowing about a
+// server you cannot reach directly.
+function drawTunnel() {
+  const all = [...servers.values()];
+  const tunnelled = all.filter((s) => s.ssh).length;
+  const ready = all.filter((s) => s.status?.state === 'ready').length;
+  const el = $('#tunnel');
+  if (!el) return;
+  el.textContent = tunnelled
+    ? `ssh · ${tunnelled} tunnel${tunnelled === 1 ? '' : 's'} · ${ready} connected`
+    : `${ready} of ${all.length} connected`;
+}
+
 async function main() {
-  sidebar.init();
+  sidebar.init({
+    onOpenTable: (server, db, table) => openTable(server, db, table),
+    onOpenServer: (server) => openDashboard(server),
+    onServerMenu: (server, anchor) => serverMenu(server, anchor, {
+      health: openDashboard,
+      log: (name) => openQueryLog({ server: name }),
+      schema: (name) => openSchemaFor(name),
+      console: (name) => openConsole(name, '', ''),
+      edit: editServer,
+    }),
+  });
   wireChrome();
   bindKeys();
 
   await reloadServers();
+  drawTunnel();
+  document.addEventListener('mydb:status', drawTunnel);
 
   // Fire and forget: the status stream reconnects on its own.
   watchStatus(page.signal).catch((e) => {

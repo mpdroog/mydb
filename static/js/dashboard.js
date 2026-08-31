@@ -22,8 +22,9 @@ const HIST = 60;
 export function openDashboard(server) {
   return tabs.open({
     key: 'dash:' + server,
-    title: '◴ ' + server,
+    title: server,
     danger: isProduction(server),
+    server,
     build: (pane, signal) => build(pane, signal, { server }),
   });
 }

@@ -49,6 +49,7 @@ export function openConsole(server, db, sql) {
     key: 'sql:' + n,
     title: 'SQL ' + n,
     danger: isProduction(server),
+    server,
     build: (pane, signal) => build(pane, signal, { server, db, sql: sql || '' }),
   });
 }

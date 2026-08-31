@@ -15,8 +15,9 @@ const EXTRAS = ['', 'AUTO_INCREMENT', 'ON UPDATE CURRENT_TIMESTAMP'];
 export function openStructure(server, db, table) {
   return tabs.open({
     key: 'struct:' + server + ':' + db + ':' + table,
-    title: table + ' ⚙',
+    title: table,
     danger: isProduction(server),
+    server,
     build: (pane, signal) => build(pane, signal, { server, db, table }),
   });
 }

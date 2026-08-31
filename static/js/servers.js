@@ -4,15 +4,65 @@
 // field means "keep whatever is already in config.toml". Saving rewrites
 // the file atomically on the Go side.
 
-import { h, modal, field, toast } from './dom.js';
+import { h, $, modal, field, toast } from './dom.js';
 import { api } from './api.js';
+import { servers } from './state.js';
+import { colourNames, paint } from './colour.js';
 
 export function addServer(onSaved) {
   form(null, onSaved);
 }
 
 export function editServer(entry, onSaved) {
-  form(entry, onSaved);
+  form(typeof entry === 'string' ? servers.get(entry) : entry, onSaved);
+}
+
+// serverMenu is everything about one server, hung off the server itself.
+// There is no rail any more, and these are not places to go: they are
+// things to open, scoped to the connection you opened them from. "the
+// query log for prod-eu-1" is a better answer than a global page.
+export function serverMenu(s, anchor, actions) {
+  const menu = $('#menu');
+  menu.textContent = '';
+  paint(menu, s.colour);
+
+  menu.append(h('div', { class: 'who' },
+    h('span', { class: 'swatch' }), s.name));
+
+  const item = (label, fn, cls) => h('button', {
+    type: 'button', class: cls || '', text: label,
+    onclick: () => { hide(); fn?.(s.name); },
+  });
+
+  menu.append(
+    item('Server health', actions.health),
+    item('Query log', actions.log),
+    item('Schema diagram', actions.schema),
+    item('New SQL console', actions.console),
+    h('div', { class: 'sep' }),
+    item('Edit connection…', () => actions.edit(s.name)),
+    h('div', { class: 'sep' }),
+    item('Disconnect', async (name) => {
+      try { await api.disconnect(name); } catch (e) { toast(e.message, 'err'); }
+    }, 'danger'),
+  );
+
+  const box = anchor.getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.left = box.left + 'px';
+  menu.style.top = (box.bottom + 4) + 'px';
+
+  const hide = () => {
+    menu.hidden = true;
+    document.removeEventListener('click', away, true);
+    document.removeEventListener('keydown', esc, true);
+  };
+  const away = (ev) => { if (!menu.contains(ev.target)) hide(); };
+  const esc = (ev) => { if (ev.key === 'Escape') hide(); };
+  setTimeout(() => {
+    document.addEventListener('click', away, true);
+    document.addEventListener('keydown', esc, true);
+  }, 0);
 }
 
 function form(entry, onSaved) {
@@ -30,6 +80,23 @@ function form(entry, onSaved) {
   });
 
   const production = h('input', { type: 'checkbox', checked: !!s.production });
+
+  // The identity colour. Swatches rather than a dropdown of words: the
+  // thing being chosen is a colour, and the six are far enough apart that
+  // naming them adds nothing.
+  let colour = s.colour_explicit ? s.colour : '';
+  const hues = h('div', { class: 'hues' },
+    ...colourNames.map((n) => h('button', {
+      type: 'button',
+      class: 'hue srv-' + n,
+      title: n,
+      'aria-label': 'Identity colour ' + n,
+      'aria-pressed': String(n === (colour || s.colour)),
+      onclick: (ev) => {
+        colour = n;
+        for (const b of hues.children) b.setAttribute('aria-pressed', String(b === ev.currentTarget));
+      },
+    })));
   const useSSH = h('input', { type: 'checkbox', checked: !!s.ssh });
   const sshHost = h('input', { type: 'text', value: s.ssh?.host || '', placeholder: 'bastion.example.com:22' });
   const sshUser = h('input', { type: 'text', value: s.ssh?.user || '' });
@@ -69,6 +136,13 @@ function form(entry, onSaved) {
     field('MySQL user', user),
     field('MySQL password', pass),
     h('p', { class: 'note', text: 'With SSH on, the host is resolved from the SSH server (usually 127.0.0.1).' }),
+    field('Colour', hues),
+    h('p', {
+      class: 'note',
+      text: 'What this server wears everywhere it appears: its row in the tree, '
+        + 'every chip that belongs to it, and the top edge of the window. Leave '
+        + 'it and mydb derives one from the name.',
+    }),
     field('Production', production),
     h('p', {
       class: 'note',
@@ -109,6 +183,7 @@ function form(entry, onSaved) {
       port: Number(port.value) || 3306,
       user: user.value.trim(),
       pass: pass.value,
+      colour,
       production: production.checked,
       ssh: useSSH.checked ? {
         host: sshHost.value.trim(),

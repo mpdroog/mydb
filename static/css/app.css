@@ -184,15 +184,12 @@ button:disabled { opacity: .45; cursor: default; }
 #main {
   grid-column: 2;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
-#work    { grid-row: 1; }
-#ctx     { grid-row: 2; }
-#stmt    { grid-row: 3; }
-#body    { grid-row: 4; }
-#status  { grid-row: 5; }
+#work { grid-row: 1; }
+#body { grid-row: 2; }
 
 /* --- work strip: the only navigation there is --- */
 
@@ -541,3 +538,768 @@ kbd, .key {
 .muted { color: var(--ink-2); }
 .dim   { color: var(--ink-3); }
 .mono  { font-family: var(--mono); }
+
+/* ============================================================
+   panes
+   Only one pane is on screen at a time, so its head and foot are the
+   context band and the status bar the design asks for -- swapping
+   contents per view rather than each view stacking its own furniture.
+   ============================================================ */
+
+#panes { position: absolute; inset: 0; }
+
+.pane {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+.pane > * { min-width: 0; }
+
+.pane-head {
+  grid-row: 1;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 0 8px;
+  height: var(--band);
+  border-bottom: 1px solid var(--hair);
+  background: var(--surface);
+}
+.pane-head .grow { flex: 1; }
+.pane-head label { display: flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--ink-2); }
+
+.pane-foot {
+  grid-row: 3;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 0 10px;
+  height: 27px;
+  border-top: 1px solid var(--hair);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  position: relative;
+  overflow: hidden;
+}
+.pane-foot .grow { flex: 1; }
+.pane-foot .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* The breadcrumb every pane opens with: which server, which database. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 12px/1 var(--mono);
+  color: var(--ink-2);
+  flex: none;
+}
+.crumb .env {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 600 9.5px/1 var(--cond);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--srv, var(--ink-3)) 14%, transparent);
+  color: var(--srv, var(--ink-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--srv, var(--ink-3)) 30%, transparent);
+}
+.crumb .env .swatch { background: currentColor; }
+.crumb .sep { color: var(--ink-3); }
+.crumb b { color: var(--ink); font-weight: 500; }
+
+/* Production: the hazard edge is on #app, so a pane needs nothing beyond
+   its own head reading a shade warmer. */
+.pane.prod .pane-head { background: color-mix(in srgb, var(--crit) 7%, var(--surface)); }
+
+.prod-badge {
+  flex: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--crit-wash);
+  color: var(--crit);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--crit) 35%, transparent);
+  font: 600 9.5px/1 var(--cond);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   grid
+   ============================================================ */
+
+.gridwrap { grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.gridwrap > .grid-tools { grid-row: 1; }
+.gridwrap > .grid { grid-row: 2; }
+
+.grid-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  height: 28px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--hair);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.grid-tools .grow { flex: 1; }
+.grid-tools button {
+  height: 21px;
+  padding: 0 8px;
+  border: 1px solid var(--hair-2);
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-2);
+  font: 500 11px/1 var(--sans);
+}
+.grid-tools button:hover { color: var(--ink); border-color: var(--ink-3); }
+.grid-tools .gall { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; color: var(--ink-3); }
+
+/* The global input rule is written for text fields; a checkbox has no use
+   for a border, a radius or 3px/6px of padding, and a browser paints that
+   background straight over the widget. */
+.gsel {
+  flex: none;
+  width: auto; height: auto;
+  margin: 0; padding: 0;
+  border: 0; border-radius: 0;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.grid { position: relative; overflow: auto; min-height: 0; }
+.grid:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
+
+.grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--hair-2);
+  box-shadow: var(--lift);
+  width: max-content;
+  min-width: 100%;
+}
+.gh {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  height: 27px;
+  white-space: nowrap;
+  overflow: hidden;
+  flex: none;
+  font: 600 11px/1 var(--cond);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+/* The name gives way in a narrow column, not the tick box. */
+.gh > span:not(.rz) { overflow: hidden; text-overflow: ellipsis; }
+.gh .pk { color: var(--accent); }
+/* The declared type, inline and at a whisper, so you stop opening
+   Structure to find out whether a column is a decimal or a varchar. */
+.gh .ty {
+  font: 400 9.5px/1 var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+}
+.gh .rz { position: absolute; top: 0; right: -2px; bottom: 0; width: 5px; cursor: col-resize; }
+.gh .rz:hover { background: color-mix(in srgb, var(--accent) 50%, transparent); }
+
+.grid-body { position: relative; width: max-content; min-width: 100%; }
+.grid-rows { position: absolute; top: 0; left: 0; right: 0; }
+
+/* No zebra and no vertical rules: one hairline per row, and alignment does
+   the rest. That leaves selection free to be the only filled row. */
+.gr { display: flex; height: var(--row); border-bottom: 1px solid var(--hair); }
+.gr:hover { background: var(--surface-2); }
+.gr.sel { background: var(--accent-wash); border-bottom-color: color-mix(in srgb, var(--accent) 28%, transparent); }
+.gr.sel .gc:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+.gc {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.gc.num { justify-content: flex-end; }
+.gc.focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+.gc.bin { color: var(--warn); }
+/* NULL as a dashed chip rather than grey italics: it is a value the
+   database holds, not a formatting accident. */
+.gc.null { color: var(--ink-3); font-style: normal; }
+.gc.null::before {
+  content: "NULL";
+  font: 500 9.5px/1 var(--cond);
+  letter-spacing: .1em;
+  border: 1px dashed var(--hair-2);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+.gc input {
+  width: 100%;
+  padding: 0 2px;
+  border: 0;
+  background: var(--sunken);
+  font: inherit;
+  color: var(--ink);
+}
+.gc input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* ============================================================
+   the statement band
+   The query is not a filter squeezed into a text field: it is the thing
+   being worked on, and it gets as many lines as it has.
+   ============================================================ */
+
+.stmt-box {
+  position: relative;
+  display: grid;
+  font: 400 12.5px/1.6 var(--mono);
+  padding: 8px 12px 8px 42px;
+  min-height: 34px;
+  max-height: 210px;
+  overflow: auto;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--hair);
+  tab-size: 2;
+}
+.stmt-mirror, .stmt-in {
+  grid-area: 1 / 1;
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.stmt-mirror { pointer-events: none; color: var(--ink-2); }
+.stmt-in {
+  border: 0;
+  padding: 0;
+  resize: none;
+  background: none;
+  color: transparent;
+  caret-color: var(--accent);
+  overflow: hidden;
+}
+.stmt-in:focus { outline: none; }
+.stmt-in::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+.stmt-mirror .kw  { color: var(--accent); font-weight: 500; }
+.stmt-mirror .str { color: var(--ok); }
+.stmt-mirror .num { color: var(--warn); }
+.stmt-mirror .cm  { color: var(--ink-3); font-style: italic; }
+/* The statement the cursor is in is the one Ctrl+Enter runs. */
+.stmt-mirror .st.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.stmt-mirror .st.bad {
+  background: color-mix(in srgb, var(--crit) 11%, transparent);
+  text-decoration: underline wavy var(--crit);
+  text-underline-offset: 3px;
+}
+
+.stmt-gutter {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 30px;
+  text-align: right;
+  font: 400 11px/1.6 var(--mono);
+  color: var(--ink-3);
+  user-select: none;
+  pointer-events: none;
+}
+.stmt-gutter .on  { color: var(--accent); font-weight: 500; }
+.stmt-gutter .bad { color: var(--crit); font-weight: 500; }
+
+.stmt-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--sunken);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.stmt-foot .grow { flex: 1; }
+.stmt-foot .dirty { color: var(--warn); font-weight: 500; }
+.stmt-foot button {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: 400 11px/1 var(--sans);
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.stmt-foot button:hover { color: var(--ink); background: var(--surface-2); }
+
+/* One chip per statement in the buffer. Absent when there is only one:
+   the status bar already says everything about it. */
+.results { display: flex; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--hair); overflow-x: auto; }
+.res {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  font: 400 11.5px/1 var(--sans);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.res:hover { background: var(--surface-2); }
+.res[aria-selected="true"], .res.on { background: var(--surface); border-color: var(--hair-2); color: var(--ink); }
+.res .n { font: 500 11px/1 var(--mono); color: var(--ink-3); }
+.res .verb { font: 600 9px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.res .tbl { font: 400 11.5px/1 var(--mono); }
+/* Outcome only. Duration lives in the status bar, for whichever chip is
+   selected, so no number is printed in two places at once. */
+.res .out { font: 400 10.5px/1 var(--mono); color: var(--ink-3); }
+.res[aria-selected="true"] .verb, .res.on .verb { color: var(--accent); }
+.res.bad .verb, .res.bad .out { color: var(--crit); }
+.res.bad[aria-selected="true"], .res.bad.on { border-color: color-mix(in srgb, var(--crit) 45%, transparent); }
+
+/* the old console editor, until the band replaces it everywhere */
+.sql-edit {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--sunken);
+  color: var(--ink);
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  padding: 8px 10px;
+}
+.sql-edit:focus { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
+.edit-box { position: relative; display: grid; }
+.pane.sql { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+
+.hist { max-height: 40vh; overflow: auto; }
+.hist button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  border-radius: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 400 12px/1.5 var(--mono);
+  padding: 6px 10px;
+  white-space: pre-wrap;
+}
+.hist button:hover { background: var(--surface-2); color: var(--ink); }
+
+pre.sql {
+  margin: 0;
+  padding: 10px;
+  background: var(--sunken);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  font: 400 12px/1.6 var(--mono);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  max-height: 40vh;
+  overflow: auto;
+}
+pre.sql .kw { color: var(--accent); font-weight: 500; }
+pre.sql .str { color: var(--ok); }
+pre.sql.dim { color: var(--ink-3); max-height: 8em; }
+
+/* ============================================================
+   completion
+   ============================================================ */
+
+.complete {
+  position: absolute;
+  z-index: 20;
+  min-width: 260px;
+  max-width: 460px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--hair-2);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+.complete[hidden] { display: none; }
+.citem {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: default;
+}
+.citem.on { background: var(--accent-wash); }
+.citem .cname { font: 400 12px/1 var(--mono); color: var(--ink); }
+.citem .ckind { font: 400 10px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+
+.caret-mirror {
+  position: absolute;
+  top: 0; left: 0;
+  visibility: hidden;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+}
+
+/* ============================================================
+   structure editor
+   ============================================================ */
+
+.struct { grid-row: 2; overflow: auto; padding: 12px; }
+table.st { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }
+table.st th, table.st td {
+  border-bottom: 1px solid var(--hair);
+  padding: 5px 8px;
+  text-align: left;
+  font-weight: 400;
+}
+table.st th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  border-bottom-color: var(--hair-2);
+  font: 600 10.5px/1 var(--cond);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+table.st input[type=text] {
+  width: 100%;
+  background: var(--sunken);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: 400 12px/1 var(--mono);
+  color: var(--ink);
+}
+table.st input[type=text]:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+table.st td.narrow { width: 1%; white-space: nowrap; text-align: center; }
+.st-title {
+  margin: 16px 0 6px;
+  font: 600 10.5px/1 var(--cond);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ============================================================
+   schema diagram
+   ============================================================ */
+
+.erm-pane { grid-template-rows: auto minmax(0, 1fr) auto; }
+.erm-canvas { grid-row: 2; overflow: hidden; background: var(--sunken); cursor: grab; min-height: 0; }
+.erm-canvas.dragging { cursor: grabbing; }
+.erm-canvas:focus { outline: none; }
+.erm-svg { display: block; width: 100%; height: 100%; user-select: none; }
+.zoom-pct { min-width: 52px; font-variant-numeric: tabular-nums; text-align: center; }
+
+.erm-box   { fill: var(--surface); stroke: var(--hair-2); }
+.erm-head  { fill: var(--surface-2); }
+.erm-title { fill: var(--ink); font: 600 12px var(--sans); }
+.erm-col     { fill: var(--ink-2); font: 400 11px var(--mono); }
+.erm-col-pk  { fill: var(--accent); }
+.erm-col-fk  { fill: var(--ink); }
+.erm-more    { fill: var(--ink-3); font-style: italic; }
+.erm-node    { cursor: pointer; }
+.erm-node:hover .erm-box { stroke: var(--accent); stroke-width: 1.6; }
+.erm-view .erm-box { stroke-dasharray: 4 3; }
+
+/* Solid means asserted; the colour says by whom. Grey: the schema declares
+   it. Amber and dashed: mydb guessed. Accent: you said so, in config.toml.
+   A guess never gets to look like either of the other two. */
+.erm-edge   { stroke: var(--ink-3); stroke-width: 1.3; fill: none; }
+.erm-guess  { stroke: var(--warn); stroke-dasharray: 5 4; }
+.erm-manual { stroke: var(--accent); stroke-width: 1.7; }
+.erm-smell  { stroke: var(--crit); }
+
+.erm-group-bg { fill: color-mix(in srgb, var(--accent) 4%, transparent); stroke: var(--hair); }
+.erm-group-component { stroke: color-mix(in srgb, var(--srv-azure) 40%, transparent); }
+.erm-group-hub       { stroke: color-mix(in srgb, var(--warn) 35%, transparent); }
+.erm-group-prefix    { stroke: color-mix(in srgb, var(--ok) 30%, transparent); }
+.erm-group-label { fill: var(--ink-3); font: 500 10px var(--cond); letter-spacing: .12em; text-transform: uppercase; }
+
+/* A copy kept aside: present, but not competing for attention. */
+.erm-backup .erm-box { stroke-dasharray: 2 3; opacity: .55; }
+.erm-backup .erm-title { opacity: .55; }
+
+/* Focus mode: everything unrelated recedes so one table can be read. */
+.erm-focused .erm-node { opacity: .22; }
+.erm-focused .erm-node.lit { opacity: 1; }
+.erm-focused .erm-edge { opacity: .12; }
+.erm-focused .erm-edge.lit { opacity: 1; stroke: var(--accent); stroke-width: 2; }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--warn);
+  text-decoration: underline;
+  font: inherit;
+}
+.link-btn:hover { color: var(--crit); }
+
+/* ============================================================
+   dashboard
+   ============================================================ */
+
+.pane.dash { grid-template-rows: auto minmax(0, 1fr) auto; }
+.dash-body { grid-row: 2; overflow: auto; min-height: 0; padding: 10px; display: grid; gap: 10px; align-content: start; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 1px solid var(--hair); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.tile { padding: 9px 11px 7px; border-right: 1px solid var(--hair); display: grid; gap: 2px; align-content: start; min-width: 0; }
+.tile:last-child { border-right: 0; }
+.tile.wide { grid-column: span 2; }
+.tile-label { font: 600 10px/1 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.tile-value { font: 500 20px/1.1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tile.warn .tile-value { color: var(--warn); }
+.tile.bad  .tile-value { color: var(--crit); }
+
+.spark { display: block; width: 100%; height: 22px; margin-top: 2px; }
+.spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.tile.warn .spark polyline { stroke: var(--warn); }
+.tile.bad  .spark polyline { stroke: var(--crit); }
+
+.counters { display: grid; grid-template-columns: 1fr auto auto; gap: 0 10px; font-size: 11px; margin-top: 2px; }
+.counters .cname { color: var(--ink-3); }
+.counters .cval, .counters .ctot { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.counters .ctot { color: var(--ink-3); }
+.counters .hot { color: var(--warn); font-weight: 600; }
+
+.sec { border: 1px solid var(--hair); border-radius: 7px; background: var(--surface); overflow: hidden; }
+.sec[hidden] { display: none; }
+.sec.bad { border-color: color-mix(in srgb, var(--crit) 42%, transparent); }
+.sec h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0 11px;
+  height: 32px;
+  font: 600 11px/1 var(--cond);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--hair);
+}
+.sec h3 .grow { flex: 1; }
+.sec.bad h3 { color: var(--crit); background: var(--crit-wash); border-bottom-color: color-mix(in srgb, var(--crit) 28%, transparent); }
+.sec-body { max-height: 46vh; overflow: auto; }
+.sec-body .gr { height: auto; min-height: var(--row); align-items: center; }
+.sec-body .gc { flex: none; }
+.sec-body .gc.grow { flex: 1; min-width: 0; }
+.sec-body .gr.self { opacity: .5; }
+.sec-body .gr.slow .w-time, .sec-body .gr.hot .w-time { color: var(--warn); font-weight: 500; }
+.sec-body .gr.wait { background: var(--crit-wash); }
+
+.w-id { width: 68px; color: var(--ink-3); }
+.w-user { width: 120px; }
+.w-db { width: 100px; }
+.w-cmd { width: 78px; }
+.w-time { width: 78px; justify-content: flex-end; }
+.w-state { width: 150px; }
+.w-rows { width: 110px; }
+.w-flags { width: 130px; }
+
+/* One action per row, and only while the pointer is on it: no column of
+   outlined buttons running down the page. */
+.w-kill, .gc.kill { width: 84px; display: flex; gap: 4px; padding: 0 6px; }
+.gc.kill button {
+  height: 18px;
+  padding: 0 6px;
+  font: 500 10px/1 var(--sans);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-3);
+  opacity: 0;
+}
+.gr:hover .gc.kill button, .gc.kill button:focus-visible { opacity: 1; }
+.gc.kill button:hover { color: var(--crit); background: color-mix(in srgb, var(--crit) 12%, transparent); }
+
+.memrow { display: flex; align-items: center; gap: 8px; padding: 4px 11px; font-size: 11px; }
+.memlabel { width: 190px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memval { width: 200px; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.bar { flex: 1; height: 8px; background: var(--sunken); border: 1px solid var(--hair); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); opacity: .6; }
+
+.dash-notes { display: grid; gap: 4px; }
+.dash-notes .note { padding: 4px 10px; border-left: 2px solid var(--hair); color: var(--ink-3); font-size: 11.5px; }
+
+/* ============================================================
+   query log
+   ============================================================ */
+
+.pane.qlog { grid-template-rows: auto minmax(0, 1fr) auto; }
+.qlog-list { grid-row: 2; overflow: auto; min-height: 0; }
+.qentry { border-bottom: 1px solid var(--hair); }
+.qentry.bad { background: var(--crit-wash); }
+.qhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px;
+  height: 27px;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.qhead .grow { flex: 1; }
+.qhead button { height: 19px; padding: 0 7px; border: 1px solid var(--hair-2); border-radius: 4px; background: none; color: var(--ink-2); font: 500 11px/1 var(--sans); }
+.qhead button:hover { color: var(--ink); border-color: var(--ink-3); }
+.qtime { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.qstate { color: var(--crit); font-weight: 600; }
+.qentry pre.sql { border: 0; border-radius: 0; max-height: 12em; background: transparent; }
+.qerr { padding: 6px 11px; color: var(--crit); font: 400 11.5px/1.5 var(--mono); white-space: pre-wrap; }
+
+/* ============================================================
+   dialogs, palette, plan, help
+   ============================================================ */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8vh;
+  z-index: 60;
+}
+.modal[hidden] { display: none; }
+.modal .card {
+  display: block;
+  min-width: 420px;
+  max-width: min(860px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+}
+.card h2 { margin: 0; padding: 11px 14px; font: 600 12px/1 var(--cond); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); border-bottom: 1px solid var(--hair); }
+.card .body { padding: 14px; display: grid; gap: 10px; }
+.card .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--hair); }
+
+.field-row { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px; align-items: center; }
+.field-row > label { color: var(--ink-2); }
+.field-row input[type=text], .field-row input[type=password], .field-row input[type=number], .field-row select {
+  background: var(--sunken);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  color: var(--ink);
+  font: 400 12.5px/1 var(--mono);
+}
+.field-row input:focus, .field-row select:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.note { color: var(--ink-3); font-size: 11.5px; }
+.warn-text { color: var(--warn); }
+.err-text  { color: var(--crit); }
+.danger { background: var(--crit-wash); border-color: color-mix(in srgb, var(--crit) 40%, transparent); color: var(--crit); }
+.danger:hover { border-color: var(--crit); }
+
+.pal input { width: 100%; border: 0; background: none; font: 400 16px/1.2 var(--sans); color: var(--ink); }
+.pal input:focus { outline: none; }
+.pal-list { max-height: 50vh; overflow: auto; }
+.pal-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  padding: 7px 10px;
+  color: var(--ink-2);
+  font: 400 13px/1.2 var(--sans);
+}
+.pal-list button .nm { font: 400 12.5px/1 var(--mono); color: var(--ink); }
+.pal-list button .kind { font: 600 9px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); width: 26px; flex: none; }
+.pal-list button .sub { margin-left: auto; font-size: 11.5px; color: var(--ink-3); }
+.pal-list button.on { background: var(--accent-wash); border-left-color: var(--srv, var(--accent)); }
+.pal-list button.on .kind { color: var(--srv, var(--accent)); }
+
+.plan { display: grid; gap: 10px; min-width: 620px; }
+.plan-sum { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.plan-tree { border: 1px solid var(--hair); border-radius: var(--radius); overflow: auto; max-height: 50vh; }
+.plan-node { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--hair); }
+.plan-node.step { color: var(--ink-3); background: var(--surface-2); }
+.plan-node.bad { background: var(--crit-wash); }
+.plabel { font: 400 12px/1 var(--mono); }
+.flag {
+  font: 500 10px/1 var(--cond);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  border: 1px solid var(--hair-2);
+  white-space: nowrap;
+}
+.flag.bad { background: var(--crit-wash); border-color: color-mix(in srgb, var(--crit) 40%, transparent); color: var(--crit); }
+.flag.ok  { background: color-mix(in srgb, var(--ok) 14%, transparent); border-color: color-mix(in srgb, var(--ok) 40%, transparent); color: var(--ok); }
+
+.help { display: grid; gap: 10px; min-width: 520px; }
+.keys h3 { margin: 12px 0 5px; font: 600 10px/1 var(--cond); letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); }
+.keys dl { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.keys dd { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+.keys dt[hidden], .keys dd[hidden] { display: none; }
+
+.confirm { display: grid; gap: 12px; max-width: 720px; }
+.confirm-lead { margin: 0; }
+.confirm-lead code { font-family: var(--mono); color: var(--warn); }
+.confirm-count { display: flex; align-items: center; gap: 10px; }
+.confirm-prod { display: grid; gap: 5px; }
+.confirm-prod input { font-family: var(--mono); }
+
+.busy { color: var(--warn); }
+.spin::after {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-left: 6px;
+  border: 2px solid var(--warn);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin::after { animation: none; } }
+
+.err-line { padding: 3px 10px 7px 26px; color: var(--crit); font: 400 11px/1.4 var(--mono); white-space: pre-wrap; }
+
+/* server identity swatches in the connection sheet */
+.hues { display: flex; gap: 6px; }
+.hue {
+  width: 28px; height: 24px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hair-2);
+  background: var(--srv);
+  padding: 0;
+}
+.hue[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--srv); }

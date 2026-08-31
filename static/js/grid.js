@@ -15,7 +15,13 @@
 
 import { h, clear, toast, copyText, fmtNum } from './dom.js';
 
-const ROW = 24;      // must match --row in app.css
+// Row height comes from --row rather than a constant, so the density
+// switch moves the virtualization arithmetic with it. Read once per grid:
+// it cannot change without the stylesheet changing.
+function rowHeight() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--row');
+  return parseInt(v, 10) || 25;
+}
 const OVER = 6;      // rows rendered above and below the viewport
 const BOX = 18;      // room a header tick box takes
 const MINW = 64;
@@ -52,6 +58,7 @@ export function createGrid() {
   );
   const el = h('div', { class: 'gridwrap' }, tools, scroll);
 
+  const ROW = rowHeight();
   let cols = [];
   let rows = [];
   let widths = [];
@@ -123,11 +130,24 @@ export function createGrid() {
         title: c.name + ' — ' + c.type + (isPk ? ' (primary key)' : ''),
       },
         box,
-        h('span', { class: isPk ? 'pk' : '', text: c.name }),
+        h('span', { class: isPk ? 'pk' : '' }, isPk ? '\u26bf ' + c.name : c.name),
+        h('span', { class: 'ty', text: shortType(c.type) }),
         grip,
       ));
     });
     syncTools();
+  }
+
+  // shortType trims a declared type down to what fits beside a name. The
+  // width and the unsigned flag are the parts you check for; the rest is
+  // in Structure.
+  function shortType(t) {
+    return String(t || '')
+      .toLowerCase()
+      .replace(/\s*unsigned/, ' u')
+      .replace(/^(enum|set)\b.*/, '$1')
+      .replace(/\s*zerofill/, '')
+      .trim();
   }
 
   // ---- column ticks + CSV --------------------------------------------
@@ -195,6 +215,12 @@ export function createGrid() {
 
   // ---- rows ---------------------------------------------------------
 
+  // numeric decides which columns right-align. Digits that line up can be
+  // compared down the column; ragged ones cannot.
+  function numeric(t) {
+    return /^(tiny|small|medium|big)?int|^decimal|^numeric|^float|^double|^bit/i.test(String(t || ''));
+  }
+
   function makeRow() {
     const tr = h('div', { class: 'gr' });
     for (let i = 0; i < cols.length; i++) {
@@ -208,18 +234,22 @@ export function createGrid() {
 
   function fillRow(tr, r) {
     tr.dataset.row = String(r);
-    tr.className = 'gr' + (r % 2 ? ' alt' : '') + (r === focus.r ? ' sel' : '');
+    tr.className = 'gr' + (r === focus.r ? ' sel' : '');
     const row = rows[r];
     for (let i = 0; i < cols.length; i++) {
       const td = tr.children[i];
       const v = row[i];
       let cls = 'gc';
-      if (v === null || v === undefined) cls += ' null';
+      const isNull = v === null || v === undefined;
+      if (isNull) cls += ' null';
       else if (cols[i].binary) cls += ' bin';
+      else if (numeric(cols[i].type)) cls += ' num';
       if (r === focus.r && i === focus.c) cls += ' focus';
       td.className = cls;
-      td.textContent = v === null || v === undefined ? 'NULL' : v;
-      td.title = v === null || v === undefined ? 'NULL' : v;
+      // A NULL cell carries no text: the stylesheet draws the dashed chip,
+      // so a copy of the cell does not silently become the string "NULL".
+      td.textContent = isNull ? '' : v;
+      td.title = isNull ? 'NULL' : v;
       td.style.width = widths[i] + 'px';
     }
   }

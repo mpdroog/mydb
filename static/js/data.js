@@ -18,6 +18,7 @@ export function openTable(server, db, table) {
     key: 'data:' + server + ':' + db + ':' + table,
     title: table,
     danger: isProduction(server),
+    server,
     build: (pane, signal, tab) => build(pane, signal, tab, { server, db, table }),
   });
 }

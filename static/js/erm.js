@@ -20,8 +20,9 @@ const ZOOM_STEP = 1.25;
 export function openERM(server, db) {
   return tabs.open({
     key: 'erm:' + server + ':' + db,
-    title: db + ' ⌗',
+    title: db,
     danger: isProduction(server),
+    server,
     build: (pane, signal) => build(pane, signal, { server, db }),
   });
 }

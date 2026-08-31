@@ -1,326 +1,88 @@
-// sidebar.js - the servers -> databases -> tables tree.
+// sidebar.js - the server tree, and the flat index the palette searches.
 //
-// Expanding is lazy and never blocks: clicking a server paints "connecting"
-// from the status stream straight away and the database list fills in when
-// it arrives.
-
-import { h, clear, toast, fmtNum, $ } from './dom.js';
-import { api, aborted } from './api.js';
-import { servers, onServers, onStatus, statusOf } from './state.js';
-import { openTable } from './data.js';
-import { openERM } from './erm.js';
-import { openDashboard } from './dashboard.js';
-import { editServer } from './servers.js';
-
-const open = new Set();          // "srv" and "srv/db" keys that are expanded
-const dbCache = new Map();       // srv -> [{name, charset, collation}]
-const tableCache = new Map();    // srv/db -> [table]
-
-// charsetOf finds a database's default encoding, so a table can be compared
-// against what it should have inherited.
-function charsetOf(server, dbName) {
-  return (dbCache.get(server) || []).find((d) => d.name === dbName) || null;
-}
-
-// encodingIssue reports how a table's encoding differs from its database.
+// The tree itself lives in tree.js; this is the seam the rest of the app
+// talks to, and the place the palette gets its list of everything from.
 //
-// A different charset is the one that bites: it silently mangles text on
-// the way in or out. A matching charset with a different collation is
-// milder but still real -- joining those columns raises "Illegal mix of
-// collations" rather than returning rows.
-function encodingIssue(t, db) {
-  if (!db || !t.charset || t.type === 'VIEW') return null;
-  if (t.charset !== db.charset) {
-    return { level: 'bad', text: t.charset, why: 'table is ' + t.charset
-      + ', database default is ' + db.charset };
-  }
-  if (t.collation && db.collation && t.collation !== db.collation) {
-    return { level: 'warn', text: t.collation.replace(t.charset + '_', ''),
-      why: 'table collation is ' + t.collation + ', database default is ' + db.collation };
-  }
-  return null;
-}
-let filter = '';
-let selected = null;
+// There is no filter box here any more. Ctrl+K searches servers, databases
+// and tables across every connection, which is a strictly better answer to
+// the same question, and two search boxes for one job is one too many.
 
-export function init() {
-  const box = $('#filter');
-  box.addEventListener('input', () => { filter = box.value.trim().toLowerCase(); render(); });
-  box.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') { box.value = ''; filter = ''; render(); box.blur(); }
-  });
+import { aborted } from './api.js';
+import { servers } from './state.js';
+import * as tree from './tree.js';
+import { openPalette } from './palette.js';
 
-  onServers.on(render);
-  onStatus.on((st) => {
-    // A server that just came up gets its database list without a click.
-    if (st.state === 'ready' && open.has(st.name) && !dbCache.has(st.name)) loadDatabases(st.name);
-    render();
-  });
-}
+// index is what the palette reads: one flat list of everything the tree
+// has learned about, rebuilt as databases and tables arrive.
+const index = [];
 
-export function focusFilter() {
-  $('#filter').focus();
-  $('#filter').select();
-}
-
-export function selection() {
-  return selected;
-}
-
-// ---- data loading ----------------------------------------------------
-
-async function loadDatabases(server) {
-  try {
-    dbCache.set(server, await api.databases(server));
-    render();
-  } catch (e) {
-    if (!aborted(e)) toast(e.message, 'err');
-  }
-}
-
-async function loadTables(server, db) {
-  const key = server + '/' + db;
-  try {
-    tableCache.set(key, await api.tables(server, db));
-    render();
-  } catch (e) {
-    if (!aborted(e)) toast(e.message, 'err');
-  }
-}
-
-// ---- interaction -----------------------------------------------------
-
-function toggleServer(name) {
-  if (open.has(name)) {
-    open.delete(name);
-  } else {
-    open.add(name);
-    if (statusOf(name) === 'ready') {
-      if (!dbCache.has(name)) loadDatabases(name);
-    } else {
-      api.connect(name).catch((e) => toast(e.message, 'err'));
-    }
-  }
-  selected = { server: name };
-  render();
-}
-
-function toggleDb(server, db) {
-  const key = server + '/' + db;
-  if (open.has(key)) open.delete(key);
-  else {
-    open.add(key);
-    if (!tableCache.has(key)) loadTables(server, db);
-  }
-  selected = { server, db };
-  render();
-}
-
-// ---- rendering -------------------------------------------------------
-
-function matches(s) {
-  return !filter || s.toLowerCase().includes(filter);
-}
-
-// selKey identifies a row so selection can be moved without rebuilding.
-function selKey(sel) {
-  if (!sel) return '';
-  // The separator is escaped rather than typed literally: a raw NUL in
-  // the source makes git treat this whole file as binary, which costs
-  // every diff, blame and merge it will ever have.
-  return [sel.server, sel.db, sel.table].filter(Boolean).join('\u0000');
-}
-
-// select highlights a row *in place*.
-//
-// It must not call render(): re-rendering replaces the node under the
-// cursor, and a dblclick only fires on an element that received both
-// clicks. Rebuilding on the first click is what kept double-click to open
-// a table from ever working.
-function select(sel) {
-  selected = sel;
-  const want = selKey(sel);
-  for (const el of $('#tree').children) {
-    el.classList.toggle('sel', el.dataset.key === want && want !== '');
-  }
-}
-
-function serverNode(entry) {
-  const name = entry.name;
-  const st = entry.status?.state || 'offline';
-  const expanded = open.has(name);
-  const sel = { server: name };
-
-  const node = h('div', {
-    class: 'node server' + (selKey(selected) === selKey(sel) ? ' sel' : '')
-      + (entry.production ? ' prod' : ''),
-    dataset: { key: selKey(sel) },
-    title: name + (entry.ssh ? ' via ' + entry.ssh.host : '')
-      + (entry.production ? '\n⚠ marked production' : ''),
-  },
-    h('span', { class: 'twist', text: expanded ? '▾' : '▸' }),
-    h('span', { class: 'dot ' + st }),
-    flavorBadge(entry.status),
-    h('span', { class: 'name', text: name }),
-    entry.production ? h('span', { class: 'prod-badge', text: 'PROD' }) : null,
-    h('button', {
-      class: 'act', type: 'button', title: 'What is this server doing? (Ctrl/Cmd+Shift+D)', text: '◴',
-      onclick: (ev) => { ev.stopPropagation(); openDashboard(name); },
-    }),
-    h('button', {
-      class: 'act', type: 'button', title: 'Edit server', text: '✎',
-      onclick: (ev) => { ev.stopPropagation(); editServer(entry); },
-    }),
-    h('button', {
-      class: 'act', type: 'button', title: st === 'ready' ? 'Disconnect' : 'Connect', text: st === 'ready' ? '⏻' : '⇄',
-      onclick: (ev) => {
-        ev.stopPropagation();
-        const call = st === 'ready' ? api.disconnect(name) : api.connect(name);
-        call.catch((e) => toast(e.message, 'err'));
-      },
-    }),
-    entry.status?.idle_seconds > 0 ? h('span', { class: 'sub', text: 'idle ' + entry.status.idle_seconds + 's' }) : null,
-  );
-  node.addEventListener('click', () => toggleServer(name));
-  return node;
-}
-
-// flavorBadge marks a server as MySQL or MariaDB once it has answered.
-// The two forks differ in enough places -- DDL progress reporting, default
-// lock_wait_timeout, SHOW CREATE output -- that it is worth seeing which
-// one you are about to change.
-function flavorBadge(status) {
-  const f = status?.flavor;
-  if (!f) return h('span', { class: 'flavor none', title: 'not connected yet' });
-  return h('span', {
-    class: 'flavor ' + f,
-    text: f === 'mariadb' ? 'Ma' : 'My',
-    title: (f === 'mariadb' ? 'MariaDB' : 'MySQL') + ' ' + (status.version || ''),
-  });
-}
-
-function dbNode(server, db) {
-  const key = server + '/' + db.name;
-  const expanded = open.has(key);
-  const sel = { server, db: db.name };
-  const node = h('div', {
-    class: 'node db' + (selKey(selected) === selKey(sel) ? ' sel' : ''),
-    dataset: { key: selKey(sel) },
-    title: db.collation ? db.name + ' — default ' + db.collation : db.name,
-  },
-    h('span', { class: 'twist', text: expanded ? '▾' : '▸' }),
-    h('span', { class: 'name', text: db.name }),
-    h('button', {
-      class: 'act', type: 'button', title: 'Diagram this schema', text: '⌗',
-      onclick: (ev) => { ev.stopPropagation(); openERM(server, db.name); },
-    }),
-    db.charset ? h('span', { class: 'sub enc', text: db.charset }) : null,
-  );
-  node.addEventListener('click', () => toggleDb(server, db.name));
-  return node;
-}
-
-function tableNode(server, db, t) {
-  const sel = { server, db, table: t.name };
-  const issue = encodingIssue(t, charsetOf(server, db));
-
-  // The row count is the everyday detail, so it only gives way when there
-  // is something wrong worth seeing at a glance.
-  const sub = issue
-    ? h('span', { class: 'sub enc ' + issue.level, text: issue.text })
-    : h('span', { class: 'sub', text: t.type === 'VIEW' ? 'view' : fmtNum(t.rows) });
-
-  const node = h('div', {
-    class: 'node table' + (selKey(selected) === selKey(sel) ? ' sel' : ''),
-    dataset: { key: selKey(sel) },
-    title: t.name + (t.comment ? ' — ' + t.comment : '')
-      + '\n' + t.engine + ' · ~' + fmtNum(t.rows) + ' rows'
-      + (t.collation ? '\n' + t.collation : '')
-      + (issue ? '\n⚠ ' + issue.why : '')
-      + '\ndouble-click to open · Ctrl/Cmd+D for structure',
-  },
-    h('span', { class: 'twist' }),
-    h('span', { class: 'name', text: t.name }),
-    sub,
-  );
-  node.addEventListener('click', () => select(sel));
-  node.addEventListener('dblclick', () => openTable(server, db, t.name));
-  return node;
+export function init(handlers) {
+  tree.init(handlers);
 }
 
 export function render() {
-  const tree = $('#tree');
-  clear(tree);
+  tree.draw();
+  rebuildIndex();
+}
 
-  for (const entry of servers.values()) {
-    const st = entry.status || {};
-    const dbs = dbCache.get(entry.name) || [];
-    const serverMatches = matches(entry.name);
+export function selection() {
+  return tree.selection() || {};
+}
 
-    // While filtering, a server stays visible if anything under it matches.
-    let visibleDbs = dbs;
-    if (filter) {
-      visibleDbs = dbs.filter((db) => {
-        if (matches(db.name)) return true;
-        const ts = tableCache.get(entry.name + '/' + db.name) || [];
-        return ts.some((t) => matches(t.name));
+// focusFilter is what "/" used to do. It opens the palette already looking
+// at tables, which is what the filter was for.
+export function focusFilter() {
+  openPalette({ scope: 'tables' });
+}
+
+export function setGrouping(on) { tree.setGrouping(on); }
+export function forget(server) { tree.forget(server); rebuildIndex(); }
+
+// entries yields everything the palette can jump to. Servers always;
+// databases and tables for whatever has been expanded, since asking every
+// server for every table on every keystroke is not a search box, it is a
+// denial of service against your own database.
+export function* entries() {
+  for (const e of index) yield e;
+}
+
+// reveal selects a table in the tree and opens the prefix group holding
+// it, so jumping to something from the palette leaves it visible.
+export async function reveal({ server, db, table }) {
+  if (!server) return;
+  await tree.expand(server, db);
+  if (table) tree.reveal(server, db, table);
+  rebuildIndex();
+}
+
+function rebuildIndex() {
+  index.length = 0;
+  for (const s of servers.values()) {
+    index.push({ kind: 'server', server: s.name, label: s.name, colour: s.colour });
+  }
+  for (const { server, db, tables } of tree.known()) {
+    index.push({ kind: 'db', server, db, label: db, colour: colourOf(server) });
+    for (const t of tables || []) {
+      index.push({
+        kind: 'table', server, db, table: t.name, label: t.name,
+        rows: t.rows, view: (t.type || '').toUpperCase() === 'VIEW',
+        colour: colourOf(server),
       });
-      if (!serverMatches && !visibleDbs.length) continue;
     }
-
-    tree.append(serverNode(entry));
-
-    if (st.state === 'error' && st.error) {
-      tree.append(h('div', { class: 'err-line', text: st.error }));
-    }
-    if (!open.has(entry.name)) continue;
-
-    if (st.state === 'connecting') {
-      tree.append(h('div', { class: 'node db muted' }, h('span', { class: 'twist' }), h('span', { text: 'connecting…' })));
-      continue;
-    }
-
-    for (const db of visibleDbs) {
-      tree.append(dbNode(entry.name, db));
-      if (!open.has(entry.name + '/' + db.name)) continue;
-
-      const ts = tableCache.get(entry.name + '/' + db.name);
-      if (!ts) {
-        tree.append(h('div', { class: 'node table muted' }, h('span', { class: 'twist' }), h('span', { text: 'loading…' })));
-        continue;
-      }
-      for (const t of ts) {
-        if (filter && !matches(t.name) && !matches(db.name)) continue;
-        tree.append(tableNode(entry.name, db.name, t));
-      }
-    }
-  }
-
-  if (!servers.size) {
-    tree.append(h('div', { class: 'err-line muted', text: 'No servers configured yet — press + to add one.' }));
   }
 }
 
-// entries lists everything the quick-switcher can jump to.
-export function entries() {
-  const out = [];
-  for (const entry of servers.values()) {
-    out.push({ label: entry.name, kind: 'server', server: entry.name });
-    for (const db of dbCache.get(entry.name) || []) {
-      out.push({ label: entry.name + ' / ' + db.name, kind: 'db', server: entry.name, db: db.name });
-      for (const t of tableCache.get(entry.name + '/' + db.name) || []) {
-        out.push({
-          label: entry.name + ' / ' + db.name + ' / ' + t.name,
-          kind: 'table', server: entry.name, db: db.name, table: t.name,
-        });
-      }
-    }
-  }
-  return out;
+function colourOf(server) {
+  return servers.get(server)?.colour;
 }
 
-export function reveal({ server, db }) {
-  open.add(server);
-  if (db) open.add(server + '/' + db);
-  render();
+// warm expands a server quietly, so the palette has something to search
+// before anything has been clicked.
+export async function warm(server) {
+  try {
+    await tree.expand(server);
+    rebuildIndex();
+  } catch (e) {
+    if (!aborted(e)) console.warn('mydb: could not warm', server, e);
+  }
 }

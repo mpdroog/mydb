@@ -240,3 +240,39 @@ export function forget(server) {
   for (const k of [...cache.keys()]) if (k === server || k.startsWith(server + '/')) cache.delete(k);
   for (const k of [...open.keys()]) if (k === server || k.startsWith(server + '/')) open.delete(k);
 }
+
+// expand opens a server, and optionally one of its databases, fetching
+// what it needs. Awaitable, so the palette can jump somewhere and know the
+// tree has caught up before it selects.
+export async function expand(server, db) {
+  if (!open.has(server)) {
+    open.add(server);
+    if (!cache.has(server)) cache.set(server, await api.databases(server));
+  }
+  if (db) {
+    const key = server + '/' + db;
+    if (!open.has(key)) {
+      open.add(key);
+      if (!cache.has(key)) cache.set(key, await api.tables(server, db));
+    }
+  }
+  draw();
+}
+
+// reveal selects a table and opens the prefix group holding it.
+export function reveal(server, db, table) {
+  selected = { server, db, table };
+  revealGroup(server + '/' + db, table);
+  draw();
+}
+
+// known yields every database whose tables have been fetched, which is
+// what the palette searches. Nothing is fetched here: asking every server
+// for every table on each keystroke is not a search box.
+export function* known() {
+  for (const [key, value] of cache) {
+    if (!key.includes('/')) continue;
+    const [server, db] = key.split('/');
+    yield { server, db, tables: value };
+  }
+}

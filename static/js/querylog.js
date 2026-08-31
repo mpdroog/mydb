@@ -15,6 +15,7 @@ export function openQueryLog(prefill) {
   return tabs.open({
     key: 'qlog',
     title: 'Query log',
+    server: prefill?.server,
     build: (pane, signal) => build(pane, signal, prefill || {}),
   });
 }

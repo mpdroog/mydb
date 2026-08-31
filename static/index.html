@@ -4,34 +4,58 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>mydb</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 
-<div id="app">
+<div id="app" data-density="cozy" data-prod="off" data-sidebar="on">
+
   <aside id="sidebar">
-    <header class="side-head">
-      <input id="filter" type="search" placeholder="Filter (/)" autocomplete="off" spellcheck="false">
-      <button id="add-server" type="button" title="Add server">+</button>
-    </header>
     <nav id="tree" aria-label="Servers"></nav>
     <footer class="side-foot">
-      <button id="open-sql" type="button" title="New SQL console">SQL</button>
-      <button id="open-qlog" type="button" title="Query log — everything mydb has run">Log</button>
+      <span class="tunnel" id="tunnel"></span>
       <span class="grow"></span>
-      <button id="open-help" type="button" title="Keyboard shortcuts (?)">?</button>
+      <button id="group-toggle" class="icon" type="button" aria-pressed="true"
+              title="Group tables by shared prefix">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6.5h5l1.4 2H21v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18Z"/>
+        </svg>
+      </button>
+      <button id="open-help" class="icon" type="button" title="Shortcuts (?)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M9.2 9a3 3 0 1 1 4 2.8c-.8.3-1.2 1-1.2 1.8v.4"/><path d="M12 17.6v.01"/>
+        </svg>
+      </button>
+      <button id="add-server" class="icon" type="button" title="Add a server">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
     </footer>
   </aside>
 
   <main id="main">
-    <div id="tabrow">
-      <div id="tabbar" role="tablist"></div>
-      <div id="tabtools">
-        <button id="close-all" type="button" title="Close every tab (Ctrl/Cmd+Shift+W)" hidden>Close all</button>
-      </div>
+    <div id="work">
+      <div id="chips" role="tablist" aria-label="Open work"></div>
+      <button id="close-all" class="btn ghost" type="button" hidden>Close all</button>
+      <button id="open-any" class="btn ghost" type="button">
+        Open anything<span class="key">Ctrl+K</span>
+      </button>
     </div>
-    <div id="panes"></div>
+
+    <div id="body">
+      <div id="empty">
+        <p>Nothing open.</p>
+        <p class="sub">Double-click a table, or press <span class="key">Ctrl+K</span> to open anything.</p>
+      </div>
+      <div id="panes"></div>
+    </div>
   </main>
+
+  <div id="menu" class="menu" hidden></div>
 </div>
 
 <div id="modal" class="modal" hidden></div>
