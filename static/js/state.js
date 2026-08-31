@@ -81,6 +81,7 @@ export function runJob(request, { onState, signal, onConfirm } = {}) {
 
   let id = null;
   let cancelled = false;
+  let finished = false;
   // A schema change outlives its tab. Killing a table rebuild half-way
   // through throws away the work and then makes you wait for the rollback,
   // so closing the tab by accident must not do that. A SELECT has nothing
@@ -115,13 +116,17 @@ export function runJob(request, { onState, signal, onConfirm } = {}) {
     if (full.state === 'error') throw new Error(full.error || 'query failed');
     return full;
   })();
+  // A job that already ran to the end has nothing left to cancel, and
+  // asking anyway is what made closing a tab log "no such job" on the
+  // server: the DELETE that follows can land first and drop it.
+  done.then(() => { finished = true; }, () => { finished = true; });
 
   return {
     get id() { return id; },
     promise: done,
     async cancel() {
       cancelled = true;
-      if (id) {
+      if (id && !finished) {
         try {
           await api.cancel(id);
         } catch (e) {
@@ -134,10 +139,13 @@ export function runJob(request, { onState, signal, onConfirm } = {}) {
     // dispose stops watching and tells the server to drop the buffered
     // result, used when a tab closes. The server keeps any job that is
     // still running, so a detached schema change stays observable.
-    dispose() {
+    async dispose() {
       ctl.abort();
-      if (id && !cancelled && !detach) api.cancel(id).catch(() => {});
-      if (id) api.forget(id);
+      if (!id) return;
+      // Cancel before forgetting, or the two race and the KILL arrives for
+      // a job the server has already dropped.
+      if (!cancelled && !finished && !detach) await api.cancel(id).catch(() => {});
+      api.forget(id);
     },
   };
 }

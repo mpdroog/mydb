@@ -149,6 +149,11 @@ func main() {
 	<-stop
 	log.Print("mydb shutting down")
 
+	// End the SSE streams first. They never finish on their own, so
+	// Shutdown would otherwise sit out the whole grace period waiting for
+	// handlers that are watching a browser which is not going anywhere.
+	a.Shutdown()
+
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if e := srv.Shutdown(ctx); e != nil {

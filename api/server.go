@@ -256,6 +256,8 @@ func (a *API) StatusEvents(w http.ResponseWriter, r *http.Request, _ httprouter.
 		select {
 		case <-r.Context().Done():
 			return
+		case <-a.done:
+			return
 		case st, ok := <-ch:
 			if !ok {
 				return

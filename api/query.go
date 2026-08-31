@@ -119,6 +119,8 @@ func (a *API) JobEvents(w http.ResponseWriter, r *http.Request, ps httprouter.Pa
 		select {
 		case <-r.Context().Done():
 			return
+		case <-a.done:
+			return
 		case ev, ok := <-ch:
 			if !ok {
 				return

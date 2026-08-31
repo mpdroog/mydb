@@ -42,6 +42,8 @@ func (a *API) DashEvents(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 		select {
 		case <-r.Context().Done():
 			return
+		case <-a.done:
+			return
 		case <-tick.C:
 		}
 	}

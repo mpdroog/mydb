@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/mpdroog/mydb/connman"
@@ -26,11 +27,23 @@ const heartbeat = 15 * time.Second
 type API struct {
 	Conn *connman.Manager
 	Jobs *jobs.Manager
+	done chan struct{}
+	once sync.Once
 }
 
 // New builds the handler set.
 func New(cm *connman.Manager, jm *jobs.Manager) *API {
-	return &API{Conn: cm, Jobs: jm}
+	return &API{Conn: cm, Jobs: jm, done: make(chan struct{})}
+}
+
+// Shutdown ends every open SSE stream.
+//
+// http.Server.Shutdown waits for handlers to return, and a stream only
+// returns when the browser walks away -- so with a tab open it waited out
+// the whole grace period on every Ctrl-C. Closing this first lets the
+// streams return at once and the server go down immediately.
+func (a *API) Shutdown() {
+	a.once.Do(func() { close(a.done) })
 }
 
 // sse is an open Server-Sent Events stream.
