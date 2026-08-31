@@ -131,6 +131,10 @@ type ColumnDef struct {
 	Extra     string  `json:"extra"`
 	Comment   string  `json:"comment"`
 	Nullable  bool    `json:"nullable"`
+	// IsBinary is Binary() answered once, so the browser does not have to
+	// re-derive which types hold bytes. It got that wrong for BIT, which
+	// is the kind of rule that should be stated in one place.
+	IsBinary bool `json:"binary"`
 }
 
 // Binary reports whether this column holds bytes rather than text, which
@@ -221,6 +225,7 @@ func describeColumns(ctx context.Context, q Querier, qname string) ([]ColumnDef,
 			Extra:     cell(r, idx, "Extra"),
 			Comment:   cell(r, idx, "Comment"),
 		})
+		out[len(out)-1].IsBinary = out[len(out)-1].Binary()
 	}
 	return out, nil
 }

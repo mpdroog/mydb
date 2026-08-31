@@ -10,6 +10,9 @@ import { runJob, isProduction } from './state.js';
 import { createGrid } from './grid.js';
 import * as tabs from './tabs.js';
 import { openStructure } from './structure.js';
+import { createStatement } from './statement.js';
+import { openAddRow } from './addrow.js';
+import { crumb } from './crumb.js';
 
 const LIMIT = 1000;
 
@@ -26,39 +29,32 @@ export function openTable(server, db, table) {
 function build(pane, signal, tab, ctx) {
   pane.classList.add('data');
 
-  // Do not put WHERE in the placeholder: it reads as "type the keyword",
-  // and mydb supplies its own. A concrete example is clearer anyway.
-  const where = h('input', {
-    class: 'where',
-    type: 'text',
-    placeholder: "filter, e.g. status = 'new'   (Enter to run)",
-    title: 'The tail of the SELECT. A leading WHERE is optional, and your own '
-      + 'ORDER BY or LIMIT replaces the default ones.',
-    spellcheck: false,
-    autocomplete: 'off',
-  });
-  const runBtn = h('button', { type: 'button', text: 'Run' });
-  const structBtn = h('button', { type: 'button', title: 'Structure (Ctrl/Cmd+D)', text: 'Structure' });
-  const cancelBtn = h('button', { type: 'button', class: 'danger', text: 'Cancel', hidden: true });
+  const runBtn = h('button', { class: 'btn primary', type: 'button' }, 'Run', h('span', { class: 'key', text: 'Ctrl+Enter' }));
+  const addBtn = h('button', { class: 'btn ghost', type: 'button' }, 'Add row', h('span', { class: 'key', text: 'Ctrl+N' }));
+  const structBtn = h('button', { class: 'btn ghost', type: 'button' }, 'Structure', h('span', { class: 'key', text: 'Ctrl+D' }));
+  const cancelBtn = h('button', { class: 'btn danger', type: 'button', text: 'Cancel', hidden: true });
 
   const head = h('div', { class: 'pane-head' },
-    h('span', { class: 'muted mono', text: ctx.db + '.' + ctx.table }),
-    where, runBtn, structBtn, cancelBtn,
+    crumb(ctx.server, ctx.db, ctx.table),
+    h('span', { class: 'grow' }),
+    addBtn, structBtn, cancelBtn, runBtn,
   );
+
+  // The whole statement, editable, rather than a filter squeezed into a
+  // text box. Until you touch it the pane submits table+limit and lets the
+  // Go side build the SQL -- which is what keeps the identifiers quoted and
+  // the LIMIT from being talked upwards. Once edited it submits your text.
+  const stmt = createStatement({ onRun: () => load(), label: 'what mydb wrote for this table' });
 
   const grid = createGrid();
   const status = h('span', { text: 'loading…' });
   // The statement really does ask for one row past the limit; that extra
   // row is how "exactly 1000 rows" is told apart from "the first 1000 of
   // many". Say so, or the LIMIT reads as an off-by-one.
-  const sqlNote = h('span', {
-    class: 'mono muted',
-    title: 'The statement mydb ran. It asks for one row past the limit, '
-      + 'which is how it knows whether there are more rows to show.',
-  });
-  const foot = h('div', { class: 'pane-foot' }, status, h('span', { class: 'grow' }), sqlNote);
+  const foot = h('div', { class: 'pane-foot' }, status, h('span', { class: 'grow' }));
 
-  pane.append(head, grid.el, foot);
+  pane.append(head, stmt.el, grid.el, foot);
+  pane.classList.add('has-stmt');
 
   let job = null;
   let pk = [];
@@ -73,16 +69,13 @@ function build(pane, signal, tab, ctx) {
     job?.dispose();
     setBusy(true);
     status.textContent = 'running';
-    sqlNote.textContent = '';
 
-    job = runJob({
-      server: ctx.server,
-      db: ctx.db,
-      table: ctx.table,
-      where: where.value.trim(),
-      limit: LIMIT,
-      kind: 'data',
-    }, {
+    // Unedited: hand the Go side the table and let it write the statement,
+    // so quoting and the row limit stay its job. Edited: run what you wrote.
+    const custom = stmt.dirty() && stmt.value().trim();
+    job = runJob(custom
+      ? { server: ctx.server, db: ctx.db, sql: stmt.value(), kind: 'data' }
+      : { server: ctx.server, db: ctx.db, table: ctx.table, limit: LIMIT, kind: 'data' }, {
       signal,
       onState: (s) => {
         if (s.state === 'running' || s.state === 'queued') {
@@ -91,7 +84,9 @@ function build(pane, signal, tab, ctx) {
             ? 'waiting for connection'
             : 'running ' + fmtMs(s.elapsed_ms) + (p ? ' · ' + p : '');
         }
-        if (s.sql) sqlNote.textContent = s.sql.replace(/\s+/g, ' ');
+        // The band shows the statement that actually ran, straight from
+        // the job, so it is never a guess at what mydb would have written.
+        if (s.sql && !stmt.dirty()) stmt.rebase(s.sql);
       },
     });
 
@@ -123,12 +118,9 @@ function build(pane, signal, tab, ctx) {
   }
 
   runBtn.addEventListener('click', load);
+  addBtn.addEventListener('click', () => openAddRow(ctx, () => load()));
   structBtn.addEventListener('click', () => openStructure(ctx.server, ctx.db, ctx.table));
   cancelBtn.addEventListener('click', () => job?.cancel());
-  where.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); load(); }
-    if (ev.key === 'Escape') { ev.preventDefault(); where.blur(); grid.focusGrid(); }
-  });
 
   load();
 

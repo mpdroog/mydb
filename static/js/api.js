@@ -76,6 +76,7 @@ export const api = {
 
   alter: (r, signal) => req('POST', '/alter', r, signal),
   updateRow: (r, signal) => req('PATCH', '/row', r, signal),
+  insertRow: (r, signal) => req('POST', '/row', r, signal),
 
   kill: (r, signal) => req('POST', '/kill', r, signal),
   split: (sql, signal) => req('POST', '/split', { sql }, signal),
