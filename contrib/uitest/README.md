@@ -27,6 +27,19 @@ binary cells marked, `ORDER BY` puts the newest row first, a 5000-row table
 keeps only a viewport of rows in the DOM, tabs switch and close, and named-key
 shortcuts fire.
 
+There is also `unit/`, which needs no database and no running mydb: the
+grouping rule, the statement cutter and the column shapes are pure
+functions, and their edge cases (a column of nothing but NULL, a semicolon
+inside a quoted identifier, a bucket where lo equals hi) are cheaper to
+pin there than through a browser.
+
+```bash
+node contrib/uitest/unit/run.mjs
+```
+
+Two of the three need nothing installed; the statement one needs jsdom and
+is skipped with a note when it is missing.
+
 It also covers, in the same live-DOM way: the keyboard overlay is built from
 the keymap and every binding is described; close-all empties the tab bar; a
 multi-statement buffer runs as separate jobs with one result chip each; an
@@ -40,6 +53,13 @@ both MySQL's and MariaDB's JSON, and refuses to "analyze" anything that
 writes; and completion offers tables for a prefix and that table's columns
 after a dot; and the grid's column tick boxes drive the CSV copy, which
 quotes commas, quotes and newlines the way RFC 4180 asks.
+
+The seed below still describes what these tests expect. Since the redesign
+the suite also reads the tree by its per-kind row classes (`.srv`, `.db`,
+`.tbl`) rather than one shared `.node`, finds toolbar buttons by their
+`data-act` name rather than by position, and reads a grid header's column
+name out of its name element, because the header now carries the declared
+type beside it.
 
 Nothing it runs writes to the database: the confirm-gate test points at a
 table that does not exist, since the gate fires before any database work.

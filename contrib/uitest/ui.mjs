@@ -145,7 +145,7 @@ if (rows.length) {
 
 console.log('--- copy the ticked columns as CSV ---');
 const tools = $('#panes .pane .grid-tools');
-const csvBtn = tools?.querySelector('button');
+const csvBtn = tools?.querySelector('button[data-act=csv]');
 const allBox = tools?.querySelector('.gall .gsel');
 const boxes = $$('#panes .pane .gh .gsel');
 ok(boxes.length === headers.length, 'every column header carries a tick box',

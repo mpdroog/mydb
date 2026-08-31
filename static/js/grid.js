@@ -14,6 +14,7 @@
 // attribute, so nothing here ever calls setAttribute('style', ...).
 
 import { h, clear, toast, copyText, fmtNum } from './dom.js';
+import { shapeOf, draw as drawShape } from './shape.js';
 
 // Row height comes from --row rather than a constant, so the density
 // switch moves the virtualization arithmetic with it. Read once per grid:
@@ -29,9 +30,12 @@ const MAXW = 600;
 
 export function createGrid() {
   const head = h('div', { class: 'grid-head' });
+  // The shape strip is a second sticky row under the names, so it costs
+  // 15px for the whole table rather than a line per column.
+  const shape = h('div', { class: 'grid-shape' });
   const rowsEl = h('div', { class: 'grid-rows' });
   const body = h('div', { class: 'grid-body' }, rowsEl);
-  const scroll = h('div', { class: 'grid', tabIndex: 0 }, head, body);
+  const scroll = h('div', { class: 'grid', tabIndex: 0 }, head, shape, body);
 
   // The toolbar sits above the scroller rather than inside it: the header
   // is already sticky, and a second sticky layer would have to know the
@@ -46,14 +50,30 @@ export function createGrid() {
   const countEl = h('span', { class: 'muted' });
   const csvBtn = h('button', {
     type: 'button',
+    'data-act': 'csv',
     text: 'Copy CSV',
     title: 'Copy the ticked columns of every loaded row as CSV, header row '
       + 'included (Ctrl/Cmd+Shift+X)',
   });
+  const shapeBtn = h('button', {
+    type: 'button',
+    'data-act': 'shape',
+    text: 'Shape',
+    title: 'What each column contains, from the rows already loaded',
+    'aria-pressed': String(shapeOn()),
+  });
+  shapeBtn.addEventListener('click', () => {
+    const on = shapeBtn.getAttribute('aria-pressed') !== 'true';
+    shapeBtn.setAttribute('aria-pressed', String(on));
+    try { localStorage.setItem('mydb.shape', on ? '1' : '0'); } catch { /* private window */ }
+    buildShape();
+  });
+
   const tools = h('div', { class: 'grid-tools' },
     h('label', { class: 'gall', title: 'Tick or clear every column' }, allBox, 'all'),
     countEl,
     h('span', { class: 'grow' }),
+    shapeBtn,
     csvBtn,
   );
   const el = h('div', { class: 'gridwrap' }, tools, scroll);
@@ -83,6 +103,7 @@ export function createGrid() {
   function applyWidths() {
     for (let i = 0; i < cols.length; i++) {
       head.children[i].style.width = widths[i] + 'px';
+      if (shape.children[i]) shape.children[i].style.width = widths[i] + 'px';
     }
     for (const row of pool) {
       for (let i = 0; i < cols.length; i++) row.children[i].style.width = widths[i] + 'px';
@@ -135,7 +156,34 @@ export function createGrid() {
         grip,
       ));
     });
+    buildShape();
     syncTools();
+  }
+
+  // shapeOn remembers the choice per browser rather than per table: it is
+  // a way of working, not a property of one grid.
+  function shapeOn() {
+    try { return localStorage.getItem('mydb.shape') !== '0'; } catch { return true; }
+  }
+
+  // buildShape draws one cell per column from the rows already loaded.
+  // No query: this is the page in front of you, described.
+  function buildShape() {
+    clear(shape);
+    shape.hidden = !shapeOn() || !cols.length || !rows.length;
+    if (shape.hidden) return;
+
+    cols.forEach((c, i) => {
+      const s = shapeOf(c, rows.map((r) => r[i]));
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'shape');
+      svg.setAttribute('viewBox', '0 0 100 12');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      drawShape(s, svg);
+      const cell = h('div', { class: 'gs', title: c.name + ' — ' + s.summary }, svg);
+      cell.style.width = widths[i] + 'px';
+      shape.append(cell);
+    });
   }
 
   // shortType trims a declared type down to what fits beside a name. The

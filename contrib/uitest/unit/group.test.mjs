@@ -1,6 +1,6 @@
 // Run with: node static/js/group.test.mjs
 // Mirrors erm/group_test.go, so a change to one rule fails on both sides.
-import { byPrefix, prefixOf } from './group.js';
+import { byPrefix, prefixOf } from '../../../static/js/group.js';
 import assert from 'node:assert/strict';
 
 const t = (...names) => names.map((name) => ({ name }));

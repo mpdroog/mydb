@@ -1415,3 +1415,39 @@ table.st td.narrow .btn { margin: 0 2px; }
 .srv.prod .name { color: color-mix(in srgb, var(--crit) 65%, var(--ink)); }
 .srv .prod-badge { font-size: 8.5px; padding: 2px 4px; }
 .chip.prod { border-left-color: var(--crit); }
+
+/* ============================================================
+   the column shape strip
+   What each column actually holds, computed from the rows already
+   fetched. Twelve pixels for the whole table, not a line per column.
+   ============================================================ */
+
+.grid-shape {
+  position: sticky;
+  top: 27px;
+  z-index: 2;
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--hair-2);
+}
+.grid-shape[hidden] { display: none; }
+.grid-head { border-bottom: 0; }
+.grid-shape:where([hidden]) ~ .grid-body { border-top: 0; }
+
+.gs { flex: none; padding: 2px 10px 3px; overflow: hidden; }
+.shape { display: block; width: 100%; height: 12px; overflow: visible; }
+
+.shape .bar  { fill: color-mix(in srgb, var(--accent) 50%, transparent); }
+.shape .bar.hi { fill: var(--accent); }
+.shape .comb { stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; }
+.shape .seg.s0 { fill: color-mix(in srgb, var(--accent) 78%, transparent); }
+.shape .seg.s1 { fill: color-mix(in srgb, var(--accent) 48%, transparent); }
+.shape .seg.s2 { fill: color-mix(in srgb, var(--accent) 26%, transparent); }
+/* NULLs are drawn as absence: a dashed outline holding open the share of
+   the column they take up. */
+.shape .nulls { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 2; }
+.shape .base  { stroke: var(--hair-2); stroke-width: 1; }
+
+.grid-tools button[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
