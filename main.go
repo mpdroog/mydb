@@ -111,6 +111,7 @@ func main() {
 	router.DELETE("/api/v1/jobs/:id", a.JobForget)
 
 	router.POST("/api/v1/alter", a.Alter)
+	router.POST("/api/v1/row", a.RowInsert)
 	router.PATCH("/api/v1/row", a.RowUpdate)
 
 	// Outermost first: log, then prove the request is ours, then set the

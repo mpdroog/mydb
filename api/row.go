@@ -192,3 +192,163 @@ func nullable(s *string) any {
 	}
 	return *s
 }
+
+// insertInput is one new row. Values is keyed by column name; a nil value
+// means SQL NULL, and a column simply left out of the map takes whatever
+// default the schema gives it. That distinction is the whole point: "set
+// this to NULL" and "do not mention this column" are different statements,
+// and an auto-increment key needs the second one.
+type insertInput struct {
+	Values map[string]*string `json:"values"`
+	Server string             `json:"server"`
+	DB     string             `json:"db"`
+	Table  string             `json:"table"`
+}
+
+// RowInsert adds one row. It is deliberately not a general INSERT: the
+// console is there for that. This exists so the GUI can offer a form built
+// from the schema, and it refuses anything the form could not have meant.
+func (a *API) RowInsert(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var in insertInput
+	if e := writer.Decode(r, &in); e != nil {
+		writer.Err(w, http.StatusBadRequest, "api.RowInsert failed reading body", e)
+		return
+	}
+	if in.DB == "" || in.Table == "" {
+		writer.Err(w, http.StatusBadRequest, "api.RowInsert needs a db and table", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), config.Timeouts().DataQuery.D())
+	defer cancel()
+
+	db, release, e := a.Conn.Acquire(ctx, in.Server)
+	if e != nil {
+		writer.Err(w, http.StatusServiceUnavailable, "api.RowInsert failed connecting", e)
+		return
+	}
+	defer release()
+
+	// As with an edit: Describe both proves the table is there and says
+	// which columns are real, so nothing from the browser is interpolated
+	// without having been checked against the schema first.
+	cur, e := meta.Describe(ctx, db, in.DB, in.Table)
+	if e != nil {
+		writer.Err(w, http.StatusBadGateway, "api.RowInsert failed reading structure", e)
+		return
+	}
+
+	stmt, args, e := insertStmt(cur, in)
+	if e != nil {
+		writer.Err(w, http.StatusBadRequest, "api.RowInsert failed building statement", e)
+		return
+	}
+
+	// Strict mode matters more here than anywhere. Without it a value too
+	// long for its column is silently truncated on the way in, and the row
+	// you get back is not the row you asked for.
+	conn, e := db.Conn(ctx)
+	if e != nil {
+		writer.Err(w, http.StatusServiceUnavailable, "api.RowInsert failed taking a connection", e)
+		return
+	}
+	defer func() {
+		if e := conn.Close(); e != nil {
+			log.Printf("api.RowInsert conn.Close: %s", e)
+		}
+	}()
+	if e := connman.ApplySession(ctx, conn); e != nil {
+		writer.Err(w, http.StatusBadGateway, "api.RowInsert failed setting session mode", e)
+		return
+	}
+
+	res, e := conn.ExecContext(ctx, stmt, args...)
+	if e != nil {
+		writer.Err(w, http.StatusBadGateway, "api.RowInsert failed writing row", e)
+		return
+	}
+	n, e := res.RowsAffected()
+	if e != nil {
+		writer.Err(w, http.StatusInternalServerError, "api.RowInsert failed reading result", e)
+		return
+	}
+	// A table with no auto-increment key has no insert id, and that is not
+	// an error worth failing the whole write over.
+	var id int64
+	if v, e := res.LastInsertId(); e == nil {
+		id = v
+	}
+
+	prod := false
+	if srv, e := config.ServerByName(in.Server); e == nil {
+		prod = srv.Production
+	}
+	qlog.Append(qlog.Entry{
+		Server:     in.Server,
+		DB:         in.DB,
+		Table:      in.Table,
+		Kind:       "row",
+		SQL:        stmt,
+		State:      "done",
+		Affected:   n,
+		Production: prod,
+	})
+
+	if e := writer.Encode(w, map[string]any{"ok": true, "affected": n, "insert_id": id}); e != nil {
+		writer.Err(w, http.StatusInternalServerError, "api.RowInsert failed encoding", e)
+	}
+}
+
+// insertStmt builds the INSERT and its placeholder arguments. Values travel
+// as placeholders; only identifiers checked against the schema are ever
+// interpolated.
+func insertStmt(cur *meta.Structure, in insertInput) (string, []any, error) {
+	known := make(map[string]meta.ColumnDef, len(cur.Columns))
+	for _, c := range cur.Columns {
+		known[c.Name] = c
+	}
+
+	qname, e := meta.Qualify(cur.Database, cur.Table)
+	if e != nil {
+		return "", nil, e
+	}
+
+	// Walk the schema's own column order rather than the map's, so the
+	// statement that lands in the query log reads like the table does and
+	// is stable between two identical inserts.
+	cols := make([]string, 0, len(in.Values))
+	args := make([]any, 0, len(in.Values))
+	for _, c := range cur.Columns {
+		v, ok := in.Values[c.Name]
+		if !ok {
+			continue
+		}
+		if c.Binary() {
+			return "", nil, errors.New("api.insertStmt: binary columns are read-only: " + c.Name)
+		}
+		q, e := meta.QuoteIdent(c.Name)
+		if e != nil {
+			return "", nil, e
+		}
+		cols = append(cols, q)
+		args = append(args, nullable(v))
+	}
+
+	// Anything the browser sent that is not a column of this table is a
+	// bug or an attack, and either way is worth refusing loudly rather
+	// than quietly dropping.
+	for name := range in.Values {
+		if _, ok := known[name]; !ok {
+			return "", nil, errors.New("api.insertStmt: no such column " + name)
+		}
+	}
+
+	// A row made entirely of defaults is a legitimate thing to want.
+	if len(cols) == 0 {
+		return "INSERT INTO " + qname + " () VALUES ()", nil, nil
+	}
+
+	holders := strings.TrimSuffix(strings.Repeat("?, ", len(cols)), ", ")
+	stmt := "INSERT INTO " + qname + " (" + strings.Join(cols, ", ") + ") VALUES (" + holders + ")"
+	return stmt, args, nil
+}
