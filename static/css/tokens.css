@@ -1,0 +1,83 @@
+/* mydb design tokens.
+ *
+ * One dark ground, deliberately. There is no light variant to compromise
+ * for, so every value here is tuned for this background alone.
+ *
+ * The greys carry a slight cyan bias rather than being neutral, so the teal
+ * accent sits inside the family instead of on top of it.
+ */
+
+:root {
+  /* ---- surfaces, darkest to lightest ---- */
+  --sunken:    #0a1112;   /* wells: editors, the canvas behind a diagram */
+  --paper:     #070c0d;   /* the ground behind everything                */
+  --surface:   #101819;   /* panels, cards, the grid                     */
+  --surface-2: #172122;   /* raised bands: toolbars, headers, footers    */
+
+  /* ---- ink, brightest to dimmest ---- */
+  --ink:   #e2ebeb;       /* values, names, anything being read          */
+  --ink-2: #8fa0a2;       /* labels, prose, secondary values             */
+  --ink-3: #66787b;       /* hints, units, things present but not read   */
+
+  /* ---- lines ---- */
+  --hair:   #1e2a2b;      /* between rows: seen, not looked at           */
+  --hair-2: #2f3d3f;      /* around things you can click                 */
+
+  /* ---- accent: interactive, selected, focused. Never a state. ---- */
+  --accent:      #3fcbd6;
+  --accent-ink:  #03171a;
+  --accent-wash: #0f3234;
+
+  /* ---- semantic: state, and only state ---- */
+  --ok:         #52c78c;  /* healthy, succeeded                          */
+  --warn:       #e5ad42;  /* slow, or something mydb guessed             */
+  --crit:       #f56b64;  /* failed, blocked, production                 */
+  --crit-wash:  #2b1517;
+
+  /* ---- server identity ----
+   * Six hues in the violet-azure-magenta arc, chosen because green, amber
+   * and red already mean healthy, slow and broken, and teal is the accent.
+   * A name can never be misread as a state. Names match config.ColourNames.
+   */
+  --srv-violet:  #a78dff;
+  --srv-indigo:  #7f9dff;
+  --srv-azure:   #59aeef;
+  --srv-magenta: #e88ac2;
+  --srv-plum:    #c98ae0;
+  --srv-steel:   #8fa8c4;
+
+  /* ---- depth ---- */
+  --lift:   inset 0 1px 0 rgba(255, 255, 255, .045);
+  --shadow: 0 1px 0 rgba(255, 255, 255, .03), 0 24px 60px rgba(0, 0, 0, .62);
+  --scrim:  rgba(0, 0, 0, .66);
+
+  /* ---- type ----
+   * Sans reads as prose, Condensed labels a column without shrinking below
+   * what can be read, Mono carries everything the database said.
+   */
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ---- metrics ----
+   * --row is the one number that changes with density, so every list in the
+   * interface breathes together rather than each having its own idea.
+   */
+  --row: 25px;
+  --band: 36px;           /* height of a toolbar band */
+  --radius: 5px;
+}
+
+[data-density="compact"] {
+  --row: 20px;
+  --band: 32px;
+}
+
+/* A server's hue is set once, here, and inherited by everything inside the
+ * element that carries the class. Nothing else needs to know the value. */
+.srv-violet  { --srv: var(--srv-violet); }
+.srv-indigo  { --srv: var(--srv-indigo); }
+.srv-azure   { --srv: var(--srv-azure); }
+.srv-magenta { --srv: var(--srv-magenta); }
+.srv-plum    { --srv: var(--srv-plum); }
+.srv-steel   { --srv: var(--srv-steel); }
