@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -278,5 +279,47 @@ func TestSaveKeepsWhatWasSet(t *testing.T) {
 	}
 	if strings.Contains(string(body), "data_query") {
 		t.Errorf("save() materialised a default alongside it:\n%s", body)
+	}
+}
+
+// TestServerColourIsStableAndSafe pins the two properties the GUI relies on:
+// a server without a colour still gets one, and that choice never lands on a
+// hue the interface already uses to mean a state.
+func TestServerColourIsStableAndSafe(t *testing.T) {
+	for _, name := range []string{"local", "prod-eu-1", "staging", "a", ""} {
+		s := Server{Name: name}
+		got := s.Colour()
+		if !slices.Contains(ColourNames, got) {
+			t.Errorf("Server{Name:%q}.Colour() = %q, not one of %v", name, got, ColourNames)
+		}
+		if got != s.Colour() {
+			t.Errorf("Server{Name:%q}.Colour() is not stable", name)
+		}
+	}
+
+	// An explicit colour wins over the derived one.
+	s := Server{Name: "local", ColourName: "plum"}
+	if got := s.Colour(); got != "plum" {
+		t.Errorf("explicit colour = %q, want plum", got)
+	}
+
+	// Deriving from the name, not the position: reordering the file must not
+	// repaint a server the operator has learned to recognise.
+	first := Server{Name: "prod-eu-1"}.Colour()
+	if second := (Server{Name: "prod-eu-1"}).Colour(); first != second {
+		t.Errorf("colour depends on something other than the name: %q then %q", first, second)
+	}
+}
+
+// TestValidateRejectsAnUnknownColour keeps a typo in config.toml from
+// reaching the GUI as a server with no identity at all.
+func TestValidateRejectsAnUnknownColour(t *testing.T) {
+	c := &Config{Server: []Server{{Name: "a", Host: "h", ColourName: "puce"}}}
+	if e := c.validate(); e == nil {
+		t.Fatal("validate accepted colour = puce")
+	}
+	c.Server[0].ColourName = "azure"
+	if e := c.validate(); e != nil {
+		t.Fatalf("validate rejected a good colour: %s", e)
 	}
 }

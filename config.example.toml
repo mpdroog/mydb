@@ -53,6 +53,13 @@ pass = ""
 # name rather than click a button.
 #production = true
 
+# The server's identity colour, worn everywhere it appears so two connections
+# are never confused for each other. One of violet, indigo, azure, magenta,
+# plum or steel -- all well away from the green, amber and red that already
+# mean healthy, slow and broken, so a name can never be read as a state.
+# Leave it out and mydb derives one from the server's name.
+#colour = "azure"
+
 # A server behind a bastion. host/port are resolved on the SSH host, so
 # 127.0.0.1 here means "localhost as the bastion sees it".
 #

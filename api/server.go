@@ -15,12 +15,18 @@ import (
 // passwords are deliberately replaced with a has-a-password flag so the
 // config-file's cleartext never leaves the process.
 type serverView struct {
-	SSH     *sshView `json:"ssh,omitempty"`
-	Name    string   `json:"name"`
-	Host    string   `json:"host"`
-	User    string   `json:"user"`
-	Port    int      `json:"port"`
-	HasPass bool     `json:"has_pass"`
+	SSH  *sshView `json:"ssh,omitempty"`
+	Name string   `json:"name"`
+	Host string   `json:"host"`
+	User string   `json:"user"`
+	Port int      `json:"port"`
+	// Colour is always populated, even when the config-file leaves it out:
+	// the GUI needs a hue to draw and should not have to guess the same way
+	// twice. Explicit says whether the operator chose it, which is what the
+	// connection sheet needs to show the right swatch as selected.
+	Colour   string `json:"colour"`
+	Explicit bool   `json:"colour_explicit"`
+	HasPass  bool   `json:"has_pass"`
 	// Production is what turns the GUI red for this server and what makes
 	// a destructive statement ask for its name instead of a click.
 	Production bool `json:"production"`
@@ -45,6 +51,7 @@ type serverInput struct {
 	User       string    `json:"user"`
 	Pass       string    `json:"pass"`
 	Port       int       `json:"port"`
+	Colour     string    `json:"colour"`
 	Production bool      `json:"production"`
 }
 
@@ -65,6 +72,8 @@ func view(s config.Server) serverView {
 		Host:       s.Host,
 		Port:       s.Port,
 		User:       s.User,
+		Colour:     s.Colour(),
+		Explicit:   s.ColourName != "",
 		HasPass:    s.Pass != "",
 		Production: s.Production,
 	}
@@ -90,6 +99,7 @@ func merge(in serverInput, old config.Server, isNew bool) config.Server {
 		Port:       in.Port,
 		User:       in.User,
 		Pass:       in.Pass,
+		ColourName: in.Colour,
 		Production: in.Production,
 	}
 	if in.Pass == "" && !isNew {

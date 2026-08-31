@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,8 +45,9 @@ var ErrDuplicateServer = errors.New("config: server already exists")
 
 // Duration wraps time.Duration so TOML can express it as "5s".
 //
-//nolint:recvcheck // the encoding.TextUnmarshaler/TextMarshaler pair needs a
 // pointer receiver to decode and a value receiver to encode, same as time.Time.
+//
+//nolint:recvcheck // the encoding.TextUnmarshaler/TextMarshaler pair needs a
 type Duration time.Duration
 
 // UnmarshalText decodes a Go duration-string such as "30s" or "5m".
@@ -89,10 +92,40 @@ type Server struct {
 	Pass string `toml:"pass,omitempty"`
 	TLS  string `toml:"tls,omitempty"`
 	Port int    `toml:"port,omitzero"`
+	// Colour is the server's identity hue, worn everywhere the server
+	// appears so two connections are never confused for each other. It is
+	// a name from ColourNames, not a CSS value: the GUI owns the actual
+	// shades so they stay legible against its own background. Empty means
+	// mydb picks one, which is why an existing config-file needs no edit.
+	ColourName string `toml:"colour,omitempty"`
 	// Production marks a server where a mistake is expensive. It changes
 	// nothing about how mydb connects; it colours the GUI red and makes a
 	// destructive statement ask for the server's name instead of a click.
 	Production bool `toml:"production,omitempty"`
+}
+
+// ColourNames are the accepted values of a server's colour setting.
+//
+// They sit in the violet-azure-magenta arc on purpose. Green, amber and red
+// already mean healthy, slow and broken everywhere else in the GUI, and the
+// accent is teal, so an identity hue drawn from any of those could be read
+// as a state rather than as a name.
+var ColourNames = []string{"violet", "indigo", "azure", "magenta", "plum", "steel"}
+
+// Colour returns the server's identity hue, choosing one when the
+// config-file does not. The choice is derived from the name rather than
+// from the server's position, so adding a server above another one in the
+// file does not silently repaint it.
+func (s Server) Colour() string {
+	if s.ColourName != "" {
+		return s.ColourName
+	}
+	var h uint32 = 2166136261
+	for i := 0; i < len(s.Name); i++ {
+		h ^= uint32(s.Name[i])
+		h *= 16777619
+	}
+	return ColourNames[h%uint32(len(ColourNames))]
 }
 
 // TLSNames are the accepted values of a server's tls setting.
@@ -322,6 +355,10 @@ func (c *Config) validate() error {
 		}
 		if s.SSH != nil && s.SSH.Host == "" {
 			return fmt.Errorf("config.validate: server %q has [server.ssh] without host", s.Name)
+		}
+		if s.ColourName != "" && !slices.Contains(ColourNames, s.ColourName) {
+			return fmt.Errorf("config.validate: server %q has colour = %q, want one of %s",
+				s.Name, s.ColourName, strings.Join(ColourNames, "/"))
 		}
 		if s.TLS != "" && !TLSNames[s.TLS] {
 			return fmt.Errorf("config.validate: server %q has tls = %q, want one of false/preferred/skip-verify/true",
