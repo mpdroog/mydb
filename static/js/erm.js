@@ -9,6 +9,7 @@ import { api, aborted } from './api.js';
 import { layout, shortType } from './layout.js';
 import * as tabs from './tabs.js';
 import { isProduction } from './state.js';
+import { crumb } from './crumb.js';
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -36,19 +37,24 @@ function build(pane, signal, ctx) {
   const pct = h('button', {
     type: 'button', class: 'zoom-pct', title: 'Reset to 100%', text: '100%',
   });
-  const gaps = h('button', { type: 'button', text: 'Unlinked', title: 'Key-shaped columns mydb did not link, and why' });
+  const gaps = h('button', { class: 'btn ghost', type: 'button', text: 'Unlinked', title: 'Key-shaped columns mydb did not link, and why' });
   const backupBox = h('input', { type: 'checkbox' });
-  const relayout = h('button', { type: 'button', text: 'Re-layout' });
-  const fit = h('button', { type: 'button', text: 'Fit' });
-  const png = h('button', { type: 'button', text: 'PNG' });
-  const svgBtn = h('button', { type: 'button', text: 'SVG' });
+  const relayout = h('button', { class: 'btn ghost', type: 'button', text: 'Re-layout' });
+  const fit = h('button', { class: 'btn ghost', type: 'button', text: 'Fit' });
+  const png = h('button', { class: 'btn ghost', type: 'button', text: 'PNG' });
+  const svgBtn = h('button', { class: 'btn ghost', type: 'button', text: 'SVG' });
+
+  const linkBtn = h('button', {
+    class: 'btn', type: 'button', text: 'Link\u2026',
+    title: 'Declare a relationship the schema does not',
+  });
 
   const head = h('div', { class: 'pane-head' },
-    h('span', { class: 'muted mono', text: ctx.db }),
-    h('label', { class: 'muted' }, guessBox, ' guessed links'),
-    h('label', { class: 'muted' }, backupBox, ' backups'),
+    crumb(ctx.server, ctx.db),
+    h('label', {}, guessBox, ' guessed'),
+    h('label', {}, backupBox, ' backups'),
     h('span', { class: 'grow' }),
-    zoomOut, pct, zoomIn, fit, gaps, relayout, svgBtn, png,
+    zoomOut, pct, zoomIn, fit, gaps, linkBtn, relayout, svgBtn, png,
   );
 
   const canvas = h('div', { class: 'erm-canvas' });
@@ -65,11 +71,18 @@ function build(pane, signal, ctx) {
 
   // measureText uses a real canvas so box widths match the rendered text
   // rather than a guess at average character width.
-  const ruler = document.createElement('canvas').getContext('2d');
-  const measureText = (text, mono) => {
-    ruler.font = mono ? '11px ui-monospace, monospace' : '600 12px system-ui, sans-serif';
-    return ruler.measureText(text).width;
-  };
+  //
+  // Where there is no canvas -- a headless run, a browser with it switched
+  // off -- this is left undefined and layout() falls back to its own
+  // estimator, which is exactly what that estimator is for. Boxes come out
+  // a little loose; a diagram that does not draw at all is worse.
+  const ruler = document.createElement('canvas').getContext?.('2d');
+  const measureText = ruler
+    ? (text, mono) => {
+      ruler.font = mono ? '11px ui-monospace, monospace' : '600 12px system-ui, sans-serif';
+      return ruler.measureText(text).width;
+    }
+    : undefined;
 
   // ---- drawing -------------------------------------------------------
 
@@ -112,7 +125,9 @@ function build(pane, signal, ctx) {
   function shownLinks() {
     const on = guessBox.checked;
     const drawn = new Set(view.nodes.keys());
-    return model.links.filter((l) => (on || l.kind === 'fk')
+    // A declared link is not a guess: turning guesses off must not hide
+    // the one edge here that somebody actually checked.
+    return model.links.filter((l) => (on || l.kind !== 'guess')
       && drawn.has(l.from) && drawn.has(l.to));
   }
 
@@ -174,7 +189,9 @@ function build(pane, signal, ctx) {
       'data-to': l.to,
     });
     line.append(svg('title', {}, `${l.from}.${l.from_cols.join(',')} → ${l.to}.${l.to_cols.join(',')}`
-      + (l.kind === 'fk' ? `\nforeign key ${l.name || ''}` : `\nguessed (${l.confidence}) — ${l.rule}`)));
+      + (l.kind === 'fk' ? `\nforeign key ${l.name || ''}`
+        : l.kind === 'manual' ? '\ndeclared by you in config.toml'
+        : `\nguessed (${l.confidence}) — ${l.rule}`)));
     return line;
   }
 
@@ -226,15 +243,19 @@ function build(pane, signal, ctx) {
   }
 
   function summarise() {
-    const fk = shownLinks().filter((l) => l.kind === 'fk').length;
+    const shown = shownLinks();
+    const by = (k) => shown.filter((l) => l.kind === k).length;
     const un = (model.unmatched || []).length;
     clear(status);
-    status.append(document.createTextNode([
+    // Counted by who asserted each edge: the schema, you, or mydb. That is
+    // the distinction the three line styles are drawing.
+    const parts = [
       fmtNum(view.nodes.size) + ' of ' + fmtNum(model.tables.length) + ' tables',
-      fmtNum(fk) + ' foreign keys',
-      fmtNum(shownLinks().length - fk) + ' guessed',
-      view.groups.length + ' groups',
-    ].join(' · ')));
+      fmtNum(by('fk')) + ' declared',
+    ];
+    if (by('manual')) parts.push(fmtNum(by('manual')) + ' yours');
+    parts.push(fmtNum(by('guess')) + ' guessed', view.groups.length + ' groups');
+    status.append(document.createTextNode(parts.join(' · ')));
     if (un) {
       status.append(document.createTextNode(' · '));
       status.append(h('button', {
@@ -245,6 +266,107 @@ function build(pane, signal, ctx) {
     gaps.disabled = !un;
   }
 
+  // ---- links the operator declares -----------------------------------
+  //
+  // Written to config.toml, never to the database. mydb does not add a
+  // constraint you did not ask a migration for, and a schema that has none
+  // is usually a schema where somebody decided that on purpose.
+
+  async function saveLink(fromTbl, fromCol, toTbl, toCol) {
+    const from = model.tables.find((t) => t.name === fromTbl);
+    const to = model.tables.find((t) => t.name === toTbl);
+    const a = from?.columns?.find((c) => c.name === fromCol);
+    const b = to?.columns?.find((c) => c.name === toCol);
+    if (!a || !b) { toast('No such column', 'err'); return; }
+
+    // A join across mismatched types is a latent bug, not a typo. Say so,
+    // and then do as you were told.
+    if (shortType(a.type) !== shortType(b.type)) {
+      const go = confirm(`${fromTbl}.${fromCol} is ${a.type} and ${toTbl}.${toCol} is ${b.type}.\n\n`
+        + 'A join across different types is slow and can be wrong. Declare it anyway?');
+      if (!go) return;
+    }
+
+    try {
+      await api.addLink({
+        server: ctx.server, db: ctx.db,
+        from_table: fromTbl, from_cols: [fromCol],
+        to_table: toTbl, to_cols: [toCol],
+      }, signal);
+      toast('Linked ' + fromTbl + '.' + fromCol + ' \u2192 ' + toTbl + '.' + toCol, 'ok');
+      await reload();
+    } catch (e) {
+      if (!aborted(e)) toast(e.message, 'err');
+    }
+  }
+
+  // linkTo takes the "table.column" a candidate is written as.
+  function linkTo(fromTbl, fromCol, candidate) {
+    const dot = String(candidate).lastIndexOf('.');
+    if (dot < 1) { openLinkDialog(fromTbl, fromCol); return; }
+    saveLink(fromTbl, fromCol, candidate.slice(0, dot), candidate.slice(dot + 1));
+  }
+
+  function openLinkDialog(fromTbl, fromCol) {
+    const names = model.tables.map((t) => t.name).sort();
+    const colsOf = (t) => (model.tables.find((x) => x.name === t)?.columns || []).map((c) => c.name);
+
+    const ft = h('select', {}, ...names.map((n) => h('option', { value: n, text: n })));
+    const fc = h('select', {});
+    const tt = h('select', {}, ...names.map((n) => h('option', { value: n, text: n })));
+    const tc = h('select', {});
+    const note = h('p', { class: 'note' });
+
+    const fill = (sel, table, keep) => {
+      clear(sel);
+      for (const c of colsOf(table)) sel.append(h('option', { value: c, text: c }));
+      if (keep && colsOf(table).includes(keep)) sel.value = keep;
+    };
+
+    function check() {
+      const a = (model.tables.find((t) => t.name === ft.value)?.columns || []).find((c) => c.name === fc.value);
+      const b = (model.tables.find((t) => t.name === tt.value)?.columns || []).find((c) => c.name === tc.value);
+      const same = a && b && shortType(a.type) === shortType(b.type);
+      note.className = 'note' + (same ? '' : ' warn-text');
+      note.textContent = !a || !b ? ''
+        : same
+          ? `Both ${a.type}. The target should be unique for this to mean anything.`
+          : `Type mismatch: ${a.type} against ${b.type}. mydb will draw it and mark it.`;
+    }
+
+    ft.value = fromTbl || names[0];
+    fill(fc, ft.value, fromCol);
+    tt.value = names.find((n) => n !== ft.value) || names[0];
+    fill(tc, tt.value, 'id');
+    check();
+
+    ft.addEventListener('change', () => { fill(fc, ft.value); check(); });
+    tt.addEventListener('change', () => { fill(tc, tt.value); check(); });
+    fc.addEventListener('change', check);
+    tc.addEventListener('change', check);
+
+    const save = h('button', { class: 'btn primary', type: 'button', text: 'Declare link' });
+    const close = modal('Link two columns',
+      h('div', {},
+        h('div', { class: 'linkrow' }, ft, h('span', { class: 'dim', text: '.' }), fc,
+          h('span', { class: 'arrow', text: '\u2192' }),
+          tt, h('span', { class: 'dim', text: '.' }), tc),
+        note,
+        h('p', {
+          class: 'note',
+          text: 'Kept in config.toml under this server, not in the database. It is '
+            + 'drawn solid because you asserted it, and in its own colour because '
+            + 'the schema still does not.',
+        }),
+      ),
+      [h('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: () => close() }), save]);
+
+    save.addEventListener('click', () => {
+      close();
+      saveLink(ft.value, fc.value, tt.value, tc.value);
+    });
+  }
+
   // showGaps lists what was not linked and why. A diagram with few edges
   // is otherwise ambiguous: you cannot tell a schema that really has no
   // relationships from a rule of mine that is too strict.
@@ -252,14 +374,27 @@ function build(pane, signal, ctx) {
     const un = model.unmatched || [];
     if (!un.length) { toast('Every key-shaped column was linked', 'ok'); return; }
 
+    // Every row offers to fix itself. mydb already worked out the near
+    // misses; making you retype one of them into another dialog would be
+    // asking a question it has already answered.
     const rows = un.map((m) => h('tr', {},
       h('td', { class: 'mono', text: m.table + '.' + m.column }),
       h('td', { class: 'mono muted', text: shortType(m.type) }),
       h('td', { text: m.reason }),
-      h('td', { class: 'mono muted', text: (m.candidates || []).join(', ') }),
+      h('td', { class: 'narrow' },
+        ...(m.candidates || []).slice(0, 3).map((c) => h('button', {
+          class: 'btn ghost', type: 'button', text: c,
+          title: 'Declare ' + m.table + '.' + m.column + ' \u2192 ' + c,
+          onclick: () => { close(); linkTo(m.table, m.column, c); },
+        })),
+        h('button', {
+          class: 'btn ghost', type: 'button', text: 'Other\u2026',
+          onclick: () => { close(); openLinkDialog(m.table, m.column); },
+        })),
     ));
 
-    const close = modal('Unlinked key columns in ' + ctx.db,
+    let close;
+    close = modal('Unlinked key columns in ' + ctx.db,
       h('div', {},
         h('p', { class: 'note', text: un.length + ' column' + (un.length === 1 ? '' : 's')
           + ' looked like a key but was not linked. Only columns ending in _id, or '
@@ -431,6 +566,11 @@ function build(pane, signal, ctx) {
     };
   }
 
+  // reload re-reads the schema after a link is declared, so the new edge
+  // arrives from the server rather than being drawn from a local guess at
+  // what the server would have said.
+  const reload = () => load();
+
   async function load() {
     status.textContent = 'reading schema…';
     try {
@@ -457,6 +597,7 @@ function build(pane, signal, ctx) {
   backupBox.addEventListener('change', rebuild);
   fit.addEventListener('click', fitToView);
   gaps.addEventListener('click', showGaps);
+  linkBtn.addEventListener('click', () => openLinkDialog());
   zoomIn.addEventListener('click', () => zoomCentre(ZOOM_STEP));
   zoomOut.addEventListener('click', () => zoomCentre(1 / ZOOM_STEP));
   pct.addEventListener('click', () => {

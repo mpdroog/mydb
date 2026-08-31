@@ -98,6 +98,8 @@ func main() {
 	router.GET("/api/v1/tables", a.Tables)
 	router.GET("/api/v1/structure", a.Structure)
 	router.GET("/api/v1/erm", a.ERM)
+	router.POST("/api/v1/links", a.LinkAdd)
+	router.DELETE("/api/v1/links", a.LinkDelete)
 
 	router.GET("/api/v1/dashboard/events", a.DashEvents)
 	router.POST("/api/v1/kill", a.Kill)

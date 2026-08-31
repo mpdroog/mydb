@@ -67,6 +67,8 @@ export const api = {
   databases: (server, signal) => req('GET', '/databases?' + qs({ server }), undefined, signal),
   tables: (server, db, signal) => req('GET', '/tables?' + qs({ server, db }), undefined, signal),
   erm: (server, db, signal) => req('GET', '/erm?' + qs({ server, db }), undefined, signal),
+  addLink: (l, signal) => req('POST', '/links', l, signal),
+  deleteLink: (l, signal) => req('DELETE', '/links', l, signal),
   structure: (server, db, table, signal) => req('GET', '/structure?' + qs({ server, db, table }), undefined, signal),
 
   submit: (r, signal) => req('POST', '/query', r, signal),

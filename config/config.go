@@ -556,6 +556,64 @@ func UpdateServer(orig string, s Server) error {
 }
 
 // DeleteServer drops a server and rewrites the config-file.
+// AddLink records a relationship the operator declared. Idempotent: the
+// same link twice is not an error, it is the same answer given twice.
+func AddLink(server string, l Link) error {
+	mu.Lock()
+	defer mu.Unlock()
+	for i := range raw.Server {
+		if raw.Server[i].Name != server {
+			continue
+		}
+		for _, o := range raw.Server[i].Link {
+			if sameLink(o, l) {
+				return nil
+			}
+		}
+		raw.Server[i].Link = append(raw.Server[i].Link, l)
+		if e := commit(); e != nil {
+			raw.Server[i].Link = raw.Server[i].Link[:len(raw.Server[i].Link)-1]
+			_ = commit() //nolint:errcheck // restoring a config that already validated
+			return e
+		}
+		return save()
+	}
+	return fmt.Errorf("%w: %s", ErrNoSuchServer, server)
+}
+
+// DeleteLink forgets one. A link that is not there is not an error either:
+// the caller wanted it gone, and it is.
+func DeleteLink(server string, l Link) error {
+	mu.Lock()
+	defer mu.Unlock()
+	for i := range raw.Server {
+		if raw.Server[i].Name != server {
+			continue
+		}
+		kept := raw.Server[i].Link[:0]
+		for _, o := range raw.Server[i].Link {
+			if !sameLink(o, l) {
+				kept = append(kept, o)
+			}
+		}
+		if len(kept) == len(raw.Server[i].Link) {
+			return nil
+		}
+		raw.Server[i].Link = kept
+		if e := commit(); e != nil {
+			return e
+		}
+		return save()
+	}
+	return fmt.Errorf("%w: %s", ErrNoSuchServer, server)
+}
+
+// sameLink compares by what the link means, not by how it was written.
+func sameLink(a, b Link) bool {
+	return a.DB == b.DB && a.FromTbl == b.FromTbl && a.ToTbl == b.ToTbl &&
+		slices.Equal(a.FromCols, b.FromCols) && slices.Equal(a.ToCols, b.ToCols)
+}
+
 func DeleteServer(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
