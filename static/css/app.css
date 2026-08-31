@@ -1407,3 +1407,11 @@ table.st td.narrow { width: 1%; white-space: nowrap; text-align: center; }
 }
 .linkrow select:focus { outline: none; border-color: var(--accent); background: var(--surface); }
 table.st td.narrow .btn { margin: 0 2px; }
+
+/* A production server is marked where you click it, not only on the top
+   edge: the edge says what you are looking at, this says what you are
+   about to open. */
+.srv.prod { box-shadow: inset 3px 0 0 var(--crit); }
+.srv.prod .name { color: color-mix(in srgb, var(--crit) 65%, var(--ink)); }
+.srv .prod-badge { font-size: 8.5px; padding: 2px 4px; }
+.chip.prod { border-left-color: var(--crit); }

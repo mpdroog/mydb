@@ -300,11 +300,14 @@ function build(pane, signal, ctx) {
     }
   }
 
-  // linkTo takes the "table.column" a candidate is written as.
+  // A candidate out of Unmatched is a table name -- the tables mydb could
+  // not choose between -- so the column to point at is that table's key.
   function linkTo(fromTbl, fromCol, candidate) {
-    const dot = String(candidate).lastIndexOf('.');
-    if (dot < 1) { openLinkDialog(fromTbl, fromCol); return; }
-    saveLink(fromTbl, fromCol, candidate.slice(0, dot), candidate.slice(dot + 1));
+    const to = model.tables.find((t) => t.name === candidate);
+    const col = to?.primary_key?.[0]
+      || to?.columns?.find((c) => c.name === 'id')?.name;
+    if (!col) { openLinkDialog(fromTbl, fromCol); return; }
+    saveLink(fromTbl, fromCol, candidate, col);
   }
 
   function openLinkDialog(fromTbl, fromCol) {
@@ -384,7 +387,7 @@ function build(pane, signal, ctx) {
       h('td', { class: 'narrow' },
         ...(m.candidates || []).slice(0, 3).map((c) => h('button', {
           class: 'btn ghost', type: 'button', text: c,
-          title: 'Declare ' + m.table + '.' + m.column + ' \u2192 ' + c,
+          title: 'Declare ' + m.table + '.' + m.column + ' \u2192 ' + c + ' (its key)',
           onclick: () => { close(); linkTo(m.table, m.column, c); },
         })),
         h('button', {

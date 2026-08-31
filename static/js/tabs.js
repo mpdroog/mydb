@@ -48,7 +48,7 @@ export function open({ key, title, build, danger, server, kind }) {
 
   const label = h('span', { class: 'label', text: title });
   const btn = h('button', {
-    class: 'chip',
+    class: 'chip' + (danger ? ' prod' : ''),
     type: 'button',
     role: 'tab',
     'aria-selected': 'false',

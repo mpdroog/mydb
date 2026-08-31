@@ -16,7 +16,7 @@ import { openPalette } from './palette.js';
 // has learned about, rebuilt as databases and tables arrive.
 const index = [];
 
-export function init(handlers) {
+export function init(handlers = {}) {
   tree.init(handlers);
 }
 

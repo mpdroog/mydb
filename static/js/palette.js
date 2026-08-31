@@ -1,15 +1,29 @@
 // palette.js - the Ctrl/Cmd+K quick-switcher over servers, databases and
 // tables. It only lists what the sidebar has already loaded, so opening it
-// costs nothing and never waits on the network.
+// costs nothing and never waits on the network: asking every server for
+// every table on each keystroke is not a search box.
+//
+// This is also where the sidebar's filter went. Every row wears its
+// server's colour and says what kind of thing it is, because the same
+// table name on two servers is the case that matters -- picking `orders`
+// on production when you meant staging is not a mistake a list of
+// identical grey words helps you avoid.
 
-import { h, modal, clear } from './dom.js';
+import { h, modal, clear, fmtNum } from './dom.js';
 import { entries, reveal } from './sidebar.js';
 import { openTable } from './data.js';
 import { api } from './api.js';
+import { classOf } from './colour.js';
 
-export function openPalette() {
-  const all = entries();
-  const input = h('input', { type: 'text', placeholder: 'Jump to server, database or table…', spellcheck: false });
+export function openPalette({ scope } = {}) {
+  // Everything stays reachable whatever the scope; scoring does the
+  // steering, so "/" cannot hide a server you actually wanted.
+  const all = [...entries()];
+  const input = h('input', {
+    type: 'text',
+    placeholder: scope === 'tables' ? 'Find a table…' : 'Jump to a server, database or table…',
+    spellcheck: false,
+  });
   const list = h('div', { class: 'pal-list' });
   const box = h('div', { class: 'pal' }, input, list);
 
@@ -18,8 +32,11 @@ export function openPalette() {
 
   function score(item, q) {
     const l = item.label.toLowerCase();
-    if (!q) return 1;
-    if (l.includes(q)) return 100 - l.indexOf(q);
+    // With "/" the operator asked for tables; keep the rest reachable but
+    // never ahead of what was asked for.
+    const bias = scope === 'tables' && item.kind !== 'table' ? -50 : 0;
+    if (!q) return 1 + bias + (item.kind === 'table' ? 1 : 0);
+    if (l.includes(q)) return 100 - l.indexOf(q) + bias;
     // Loose subsequence match, so "shord" finds "shop / orders".
     let i = 0;
     for (const ch of q) {
@@ -27,7 +44,7 @@ export function openPalette() {
       if (i < 0) return 0;
       i++;
     }
-    return 1;
+    return Math.max(0.1, 1 + bias);
   }
 
   function draw() {
@@ -45,11 +62,24 @@ export function openPalette() {
     shown.forEach((it, i) => {
       list.append(h('button', {
         type: 'button',
-        class: i === cursor ? 'on' : '',
-        text: it.label,
+        class: (i === cursor ? 'on ' : '') + classOf(it.colour),
         onclick: () => choose(it),
-      }));
+      },
+        h('span', { class: 'kind', text: KIND[it.kind] || '' }),
+        h('span', { class: 'nm', text: it.label }),
+        h('span', { class: 'sub', text: where(it) })));
     });
+  }
+
+  const KIND = { server: 'srv', db: 'db', table: 'tbl' };
+
+  // where says which one this is, which is the whole reason the palette
+  // beats the sidebar filter it replaced.
+  function where(it) {
+    if (it.kind === 'server') return it.server;
+    if (it.kind === 'db') return it.server;
+    return it.server + ' · ' + it.db
+      + (it.view ? ' · view' : it.rows == null ? '' : ' · ' + fmtNum(it.rows) + ' rows');
   }
 
   function choose(it) {

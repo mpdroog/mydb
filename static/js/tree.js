@@ -11,8 +11,41 @@ import { api, aborted } from './api.js';
 import { servers, statusOf } from './state.js';
 import { classOf } from './colour.js';
 import { byPrefix } from './group.js';
+import { openTable } from './data.js';
 
 const tree = () => document.getElementById('tree');
+
+// encodingIssue reports how a table's encoding differs from the database
+// it lives in.
+//
+// A different charset is the one that bites: it silently mangles text on
+// the way in and out. A matching charset with a different collation is
+// milder but still worth seeing, because a join across two collations
+// fails with "illegal mix of collations" rather than returning rows.
+function encodingIssue(t, db) {
+  if (!db || !t.charset || (t.type || '').toUpperCase() === 'VIEW') return null;
+  if (t.charset !== db.charset) {
+    return {
+      level: 'bad',
+      text: t.charset,
+      why: 'table is ' + t.charset + ', database default is ' + db.charset,
+    };
+  }
+  if (t.collation && db.collation && t.collation !== db.collation) {
+    return {
+      level: 'warn',
+      text: t.collation.replace(t.charset + '_', ''),
+      why: 'table collation is ' + t.collation + ', database default is ' + db.collation,
+    };
+  }
+  return null;
+}
+
+// dbOf finds the database record a table belongs to, so its encoding has
+// something to be compared against.
+function dbOf(server, dbName) {
+  return (cache.get(server) || []).find((d) => d.name === dbName);
+}
 
 // What is expanded, what is selected, and which prefix groups are open.
 // Kept here rather than in the DOM so a redraw does not collapse the world.
@@ -22,10 +55,19 @@ const cache = new Map();         // "server" -> [db], "server/db" -> [table]
 
 let selected = null;             // {server, db, table}
 let grouping = true;
-let onOpen = () => {};
 
-export function init({ onOpenTable, onOpenServer, onServerMenu }) {
-  onOpen = { table: onOpenTable, server: onOpenServer, menu: onServerMenu };
+// Opening a table is what the tree is for, so that is the default rather
+// than something a caller has to remember to wire. A tree that silently
+// does nothing on double-click is a worse failure than a wrong callback,
+// because nothing about it looks broken.
+let onOpen = { table: openTable };
+
+export function init({ onOpenTable, onOpenServer, onServerMenu } = {}) {
+  onOpen = {
+    table: onOpenTable || openTable,
+    server: onOpenServer,
+    menu: onServerMenu,
+  };
 }
 
 export function setGrouping(on) { grouping = on; draw(); }
@@ -96,15 +138,21 @@ function drawTables(s, db, tables) {
 function serverRow(s) {
   const state = statusOf(s.name);
   const row = h('div', {
-    class: 'srv ' + classOf(s.colour),
+    // A production server is marked in the tree as well as on the top
+    // edge: the edge says what you are looking at, this says what you are
+    // about to click.
+    class: 'srv ' + classOf(s.colour) + (s.production ? ' prod' : ''),
+    title: s.name + (s.ssh ? ' via ' + s.ssh.host : '')
+      + (s.production ? '\n\u26a0 marked production' : ''),
     ondblclick: () => onOpen.server?.(s.name),
   },
     h('span', { class: 'twist', onclick: (ev) => { ev.stopPropagation(); toggleServer(s.name); } },
       open.has(s.name) ? '▾' : '▸'),
     h('span', { class: 'led ' + state, title: state }),
     flavorBadge(s),
-    h('span', { class: 'name', title: 'Double-click to open ' + s.name + ' health' }, s.name),
-    h('span', { class: 'meta' }, s.version || ''));
+    h('span', { class: 'name' }, s.name),
+    s.production ? h('span', { class: 'prod-badge', text: 'PROD' }) : null,
+    h('span', { class: 'meta' }, s.status?.version || ''));
 
   row.append(h('button', {
     class: 'icon srv-act',
@@ -134,11 +182,16 @@ function dots() {
 
 // A wordmark rather than a logo: both are trademarks, and a 12px redrawing
 // of either would be a poor likeness.
+// The two forks differ in enough places -- DDL progress reporting, default
+// lock_wait_timeout, SHOW CREATE output -- that it is worth seeing which
+// one you are about to change.
 function flavorBadge(s) {
-  const f = (s.status?.flavor || s.flavor || '').toLowerCase();
-  const kind = f.includes('maria') ? 'mariadb' : f.includes('mysql') ? 'mysql' : 'none';
-  const text = kind === 'mariadb' ? 'Ma' : kind === 'mysql' ? 'My' : '?';
-  return h('span', { class: 'flavor ' + kind, title: s.status?.flavor || 'not connected' }, text);
+  const f = s.status?.flavor;
+  if (!f) return h('span', { class: 'flavor none', title: 'not connected yet' });
+  return h('span', {
+    class: 'flavor ' + f,
+    title: (f === 'mariadb' ? 'MariaDB' : 'MySQL') + ' ' + (s.status.version || ''),
+  }, f === 'mariadb' ? 'Ma' : 'My');
 }
 
 function dbRow(s, db) {
@@ -150,11 +203,12 @@ function dbRow(s, db) {
   },
     h('span', { class: 'twist' }, open.has(key) ? '▾' : '▸'),
     h('span', {}, db.name),
-    db.charset ? h('span', { class: 'enc n' }, db.charset) : null);
+    db.charset ? h('span', { class: 'enc n', title: 'default encoding' }, db.charset) : null);
 }
 
 function tableRow(s, db, t, prefix) {
   const isView = (t.type || '').toUpperCase() === 'VIEW';
+  const issue = encodingIssue(t, dbOf(s.name, db.name));
   const name = prefix
     ? h('span', {}, h('span', { class: 'pfx' }, prefix + '_'), t.name.slice(prefix.length + 1))
     : h('span', {}, t.name);
@@ -164,12 +218,15 @@ function tableRow(s, db, t, prefix) {
     type: 'button',
     'data-table': t.name,
     title: t.name + (isView ? ' (view)' : ''),
+    'data-charset': t.charset || '',
     onclick: () => select(s.name, db.name, t.name),
     ondblclick: () => { select(s.name, db.name, t.name); onOpen.table?.(s.name, db.name, t.name); },
   },
     isView ? h('span', { class: 'view-mark' }, '◇') : null,
     name,
+    issue ? h('span', { class: 'enc ' + issue.level, title: issue.why }, issue.text) : null,
     h('span', { class: 'rows' }, t.rows == null ? '' : short(t.rows)));
+  if (issue) row.title = t.name + ' — ' + issue.why;
 
   if (selected && selected.server === s.name && selected.db === db.name && selected.table === t.name) {
     row.setAttribute('aria-current', 'true');

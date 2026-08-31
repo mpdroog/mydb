@@ -59,14 +59,23 @@ function ok(cond, what, extra = '') {
 }
 function click(el, count = 1) {
   for (let i = 0; i < count; i++) {
-    el.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true, detail: i + 1 }));
   }
   if (count === 2) {
-    el.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));
   }
 }
+// The tree has one class per kind of row rather than one shared .node
+// class, and a table row carries its name in a data attribute because the
+// visible text may be split to dim a shared prefix.
+const ROW = { server: '.srv', db: '.db', table: '.tbl' };
+
 function nodeNamed(cls, name) {
-  return $$('#tree .node.' + cls).find((n) => n.querySelector('.name')?.textContent === name);
+  return $$('#tree ' + ROW[cls]).find((n) => {
+    if (cls === 'table') return n.dataset.table === name;
+    if (cls === 'server') return n.querySelector('.name')?.textContent === name;
+    return n.textContent.replace(/[\u25b8\u25be]/g, '').trim().startsWith(name);
+  });
 }
 
 console.log('--- boot ---');
@@ -77,7 +86,7 @@ sidebar.render();
 // app.js starts this; without it nothing ever learns a server went ready.
 const page = new AbortController();
 state.watchStatus(page.signal).catch(() => {});
-ok($$('#tree .node.server').length >= 1, 'sidebar rendered a server row');
+ok($$('#tree .srv').length >= 1, 'sidebar rendered a server row');
 
 console.log('--- expand server -> databases ---');
 click(nodeNamed('server', 'local'));
@@ -95,20 +104,26 @@ click(before);
 const after = nodeNamed('table', 'orders');
 ok(before === after, 'the row survives a click (this is what dblclick needs)',
    before === after ? '' : 'node was replaced');
-ok(after.classList.contains('sel'), 'the clicked row is highlighted');
+ok(after.getAttribute('aria-current') === 'true', 'the clicked row is marked as current');
 
 console.log('--- DOUBLE CLICK a table ---');
 click(nodeNamed('table', 'orders'), 2);
-for (let i = 0; i < 60 && $$('#tabbar .tab').length === 0; i++) await sleep(150);
-ok($$('#tabbar .tab').length === 1, 'a tab opened');
-ok($('#tabbar .tab .label')?.textContent === 'orders', 'the tab is named after the table');
+for (let i = 0; i < 60 && $$('#chips .chip').length === 0; i++) await sleep(150);
+ok($$('#chips .chip').length === 1, 'a tab opened');
+ok($('#chips .chip .label')?.textContent === 'orders', 'the tab is named after the table');
 
 console.log('--- the grid actually has content ---');
 for (let i = 0; i < 60; i++) {
   if ($$('#panes .gr').length > 0) break;
   await sleep(150);
 }
-const headers = $$('#panes .gh').map((h) => h.textContent.replace(/\s+$/, ''));
+// A header carries the column's declared type beside its name now, so
+// read the name element rather than the whole cell.
+function colName(gh) {
+  return (gh?.querySelector('span:not(.ty):not(.rz)')?.textContent || '')
+    .replace(/^\u26bf\s*/, '').trim();
+}
+const headers = $$('#panes .gh').map(colName);
 const rows = $$('#panes .gr');
 const live = await api.structure('local', 'mydb_test', 'orders');
 ok(headers.length === live.columns.length,
@@ -178,19 +193,19 @@ ok(/all \d+ columns/.test(tools.textContent), 'and the toolbar agrees',
    JSON.stringify(tools.textContent));
 
 console.log('--- flavor badge + encoding labels ---');
-const badge = $('#tree .node.server .flavor');
+const badge = $('#tree .srv .flavor');
 ok(!!badge && badge.classList.contains('mariadb'), 'server carries a MariaDB badge',
    badge ? badge.className : 'no badge');
 ok(/MariaDB \d/.test(badge?.title || ''), 'badge tooltip names the version', badge?.title);
 
 const dbRow = nodeNamed('db', 'mydb_test');
-ok(dbRow.querySelector('.sub.enc')?.textContent === 'utf8mb4',
+ok(dbRow.querySelector('.enc')?.textContent === 'utf8mb4',
    'database row shows its default charset',
    dbRow.querySelector('.sub.enc')?.textContent);
 
 function encOf(name) {
   const n = nodeNamed('table', name);
-  const e = n?.querySelector('.sub.enc');
+  const e = n?.querySelector('.enc');
   return e ? [...e.classList].filter((c) => c === 'bad' || c === 'warn')[0] + ':' + e.textContent : 'none';
 }
 ok(encOf('legacy_latin1') === 'bad:latin1', 'a latin1 table is flagged red', encOf('legacy_latin1'));
@@ -202,8 +217,8 @@ ok(/latin1/.test(nodeNamed('table', 'legacy_latin1').title), 'the tooltip explai
 console.log('--- virtualization: a 5000-row table must not build 5000 rows ---');
 const big = nodeNamed('table', 'big');
 click(big, 2);
-for (let i = 0; i < 80 && $$('#tabbar .tab').length < 2; i++) await sleep(150);
-ok($$('#tabbar .tab').length === 2, 'second tab opened');
+for (let i = 0; i < 80 && $$('#chips .chip').length < 2; i++) await sleep(150);
+ok($$('#chips .chip').length === 2, 'second tab opened');
 for (let i = 0; i < 80; i++) {
   const p = $$('#panes .pane')[1];
   if (p && p.querySelectorAll('.gr').length) break;
@@ -363,14 +378,17 @@ if (root) {
   const gapText = $('#modal').textContent;
   ok(/things\.owner_id/.test(gapText), 'the ambiguous column is listed', gapText.slice(0, 80));
   ok(/ambiguous/.test(gapText), 'with its reason');
-  ok(/owner, owners/.test(gapText), 'and the tables it could not choose between');
+  ok(/owner/.test(gapText) && /owners/.test(gapText),
+     'and the tables it could not choose between, each offered as a link');
   window.document.dispatchEvent(new window.KeyboardEvent('keydown',
     { key: 'Escape', bubbles: true, cancelable: true }));
   await sleep(60);
 
   const foot = $('.erm-pane .pane-foot').textContent;
+  // Counted by who asserted each edge -- declared, yours, guessed -- since
+  // a link the operator wrote has nowhere to go in a two-way split.
   ok(foot.includes(real.length + ' of ' + m.tables.length + ' tables')
-     && /foreign keys/.test(foot) && /guessed/.test(foot),
+     && /declared/.test(foot) && /guessed/.test(foot),
      'footer summarises the model', JSON.stringify(foot.trim()));
   // The promise the Unlinked panel makes: a key-shaped column is either
   // drawn or explained, never silently dropped. A column that is neither
@@ -411,10 +429,10 @@ if (root) {
 console.log('--- tab switching + close ---');
 tabs.activate(tabs.all()[0].id);
 ok($$('#panes .pane')[0].hidden === false, 'switching back shows the first pane');
-const tabsBefore = $$('#tabbar .tab').length;
+const tabsBefore = $$('#chips .chip').length;
 tabs.close(tabs.all()[1].id);
-ok($$('#tabbar .tab').length === tabsBefore - 1, 'closing a tab removes it',
-   tabsBefore + ' -> ' + $$('#tabbar .tab').length);
+ok($$('#chips .chip').length === tabsBefore - 1, 'closing a tab removes it',
+   tabsBefore + ' -> ' + $$('#chips .chip').length);
 
 console.log('--- keymap: named keys must match ---');
 let hit = null;
@@ -451,12 +469,12 @@ const con = await import(STATIC + '/js/console.js');
 con.openConsole('local', 'mydb_test', 'SELECT 1');
 con.openConsole('local', 'mydb_test', 'SELECT 2');
 await sleep(50);
-ok($$('#tabbar .tab').length >= 2, 'several tabs are open');
+ok($$('#chips .chip').length >= 2, 'several tabs are open');
 ok(!$('#close-all').hidden, 'the close-all button appears once there is more than one tab');
 click($('#close-all'));
 await sleep(50);
-ok($$('#tabbar .tab').length === 0, 'close-all emptied the tab bar',
-   String($$('#tabbar .tab').length));
+ok($$('#chips .chip').length === 0, 'close-all emptied the tab bar',
+   String($$('#chips .chip').length));
 ok($('#close-all').hidden, 'and the button went away with them');
 
 console.log('--- console: several statements in one buffer ---');
@@ -472,7 +490,7 @@ ok(chips.length === 2, 'each statement got its own result', String(chips.length)
 ok(/1 row/.test(chips[0].textContent), 'the first one reports its rows', chips[0].textContent);
 click(chips[0]);
 await sleep(50);
-ok($$('#panes .pane.sql .gh')[0]?.textContent.replace(/\s+$/, '') === 'a',
+ok(colName($$('#panes .pane.sql .gh')[0]) === 'a',
    'clicking a chip shows that statement’s grid',
    $$('#panes .pane.sql .gh')[0]?.textContent);
 
