@@ -47,6 +47,11 @@ const (
 	KindFK Kind = "fk"
 	// KindGuess was inferred from naming and may be wrong.
 	KindGuess Kind = "guess"
+	// KindManual was declared by the operator in the config-file. The
+	// schema does not know about it, so it is not a constraint -- but it
+	// is not a guess either, and drawing it like one would throw away the
+	// only thing here that someone actually checked.
+	KindManual Kind = "manual"
 )
 
 // Link is one edge: From.FromCols references To.ToCols.
@@ -73,9 +78,11 @@ type Schema struct {
 	Unmatched []Unmatched `json:"unmatched"`
 }
 
-// Load reads a whole schema in four queries rather than per-table, which
-// matters on a database with a few hundred tables.
-func Load(ctx context.Context, q meta.Querier, db string) (*Schema, error) {
+// Load reads a schema. manual carries the links the operator declared for
+// this database in the config-file; they are folded in before the tables are
+// clustered, because a link the operator drew is exactly as good a reason to
+// group two tables together as a foreign key is.
+func Load(ctx context.Context, q meta.Querier, db string, manual []Link) (*Schema, error) {
 	s := &Schema{Database: db}
 
 	tables, e := loadTables(ctx, q, db)
@@ -102,14 +109,87 @@ func Load(ctx context.Context, q meta.Querier, db string) (*Schema, error) {
 		s.Tables = append(s.Tables, *tables[name])
 	}
 
-	guessed, miss := Infer(s.Tables, fks)
-	links := make([]Link, 0, len(fks)+len(guessed))
-	links = append(links, fks...)
+	// A manual link counts as known before inference runs, so the guesser
+	// never proposes a second edge for a column the operator has already
+	// answered for.
+	kept := keepReal(manual, s.Tables)
+	known := make([]Link, 0, len(fks)+len(kept))
+	known = append(known, fks...)
+	known = append(known, kept...)
+
+	guessed, miss := Infer(s.Tables, known)
+	links := make([]Link, 0, len(known)+len(guessed))
+	links = append(links, known...)
 	links = append(links, guessed...)
 	s.Links = links
-	s.Unmatched = miss
+	s.Unmatched = dropAnswered(miss, kept)
 	s.Groups = Cluster(s.Tables, s.Links)
 	return s, nil
+}
+
+// keepReal drops manual links whose tables or columns are no longer there.
+// A config-file outlives the schema it describes: a table gets renamed, and
+// the link that named it must not put a box on the diagram that does not
+// exist.
+func keepReal(manual []Link, tables []Table) []Link {
+	cols := make(map[string]map[string]bool, len(tables))
+	for _, t := range tables {
+		set := make(map[string]bool, len(t.Columns))
+		for _, c := range t.Columns {
+			set[c.Name] = true
+		}
+		cols[t.Name] = set
+	}
+
+	has := func(table string, names []string) bool {
+		set, ok := cols[table]
+		if !ok || len(names) == 0 {
+			return false
+		}
+		for _, n := range names {
+			if !set[n] {
+				return false
+			}
+		}
+		return true
+	}
+
+	out := make([]Link, 0, len(manual))
+	for _, l := range manual {
+		if !has(l.From, l.FromCols) || !has(l.To, l.ToCols) {
+			continue
+		}
+		l.Kind = KindManual
+		l.Confidence = 1
+		if l.Rule == "" {
+			l.Rule = "declared in config.toml"
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// dropAnswered removes the columns the operator has since linked by hand
+// from the list of things mydb could not link. Leaving them there would ask
+// the same question twice.
+func dropAnswered(miss []Unmatched, manual []Link) []Unmatched {
+	if len(manual) == 0 {
+		return miss
+	}
+	done := make(map[string]bool, len(manual))
+	for _, l := range manual {
+		for _, c := range l.FromCols {
+			done[l.From+"."+c] = true
+		}
+	}
+	out := make([]Unmatched, 0, len(miss))
+	for _, m := range miss {
+		if done[m.Table+"."+m.Column] {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // loadTables reads the table list.

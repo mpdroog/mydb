@@ -84,6 +84,20 @@ type SSH struct {
 
 // Server is one MySQL server as reachable from mydb.
 // Host/Port are resolved on the SSH host when SSH is set.
+// Link is a relationship the operator declared that the schema does not.
+// Plenty of production schemas have no foreign keys at all, and mydb's
+// guesser only goes so far; this is how you tell it what you know.
+//
+// It is written here rather than to the database on purpose: mydb never
+// adds a constraint you did not ask a migration for.
+type Link struct {
+	DB       string   `toml:"db"`
+	FromTbl  string   `toml:"from_table"`
+	ToTbl    string   `toml:"to_table"`
+	FromCols []string `toml:"from_cols"`
+	ToCols   []string `toml:"to_cols"`
+}
+
 type Server struct {
 	SSH  *SSH   `toml:"ssh,omitempty"`
 	Name string `toml:"name"`
@@ -102,6 +116,20 @@ type Server struct {
 	// nothing about how mydb connects; it colours the GUI red and makes a
 	// destructive statement ask for the server's name instead of a click.
 	Production bool `toml:"production,omitempty"`
+	// Link holds the relationships the operator declared by hand for this
+	// server's databases, keyed by database inside each entry.
+	Link []Link `toml:"link,omitempty"`
+}
+
+// LinksFor returns the manual links declared for one database.
+func (s Server) LinksFor(db string) []Link {
+	out := make([]Link, 0, len(s.Link))
+	for _, l := range s.Link {
+		if l.DB == db {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // ColourNames are the accepted values of a server's colour setting.
@@ -355,6 +383,16 @@ func (c *Config) validate() error {
 		}
 		if s.SSH != nil && s.SSH.Host == "" {
 			return fmt.Errorf("config.validate: server %q has [server.ssh] without host", s.Name)
+		}
+		for j, l := range s.Link {
+			if l.DB == "" || l.FromTbl == "" || l.ToTbl == "" {
+				return fmt.Errorf("config.validate: server %q link[%d] needs db, from_table and to_table",
+					s.Name, j)
+			}
+			if len(l.FromCols) == 0 || len(l.FromCols) != len(l.ToCols) {
+				return fmt.Errorf("config.validate: server %q link[%d] needs from_cols and to_cols of the same length",
+					s.Name, j)
+			}
 		}
 		if s.ColourName != "" && !slices.Contains(ColourNames, s.ColourName) {
 			return fmt.Errorf("config.validate: server %q has colour = %q, want one of %s",

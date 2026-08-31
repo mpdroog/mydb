@@ -81,6 +81,23 @@ pass = ""
 #  #passphrase = ""                  # if the key is encrypted
 #  #pass       = ""                  # last resort: password auth
 
+# Relationships the schema does not declare but you know are there. Plenty of
+# production schemas have no foreign keys at all, and mydb's guesser only goes
+# so far -- this is how you tell it what it could not work out.
+#
+# A link declared here is drawn solid on the diagram, like a foreign key, but
+# in its own colour: it is not a constraint, and mydb never writes one. It
+# also stops the guesser proposing a second edge for the same column, and
+# takes that column off the "unlinked" list. A link naming a table or column
+# that is no longer there is ignored rather than drawn.
+#
+#  [[server.link]]
+#  db         = "shop"
+#  from_table = "audit_log"
+#  from_cols  = ["order_id"]
+#  to_table   = "orders"
+#  to_cols    = ["id"]
+
 # Session settings applied to every MySQL connection.
 [mysql]
 # Without STRICT_ALL_TABLES a server silently truncates on write: editing a
