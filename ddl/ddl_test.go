@@ -257,3 +257,90 @@ func TestDiffRejects(t *testing.T) {
 		})
 	}
 }
+
+// TestDiffTableComment: a table's comment is neither a column nor an
+// index, and had nowhere to go until now.
+func TestDiffTableComment(t *testing.T) {
+	cur := &meta.Structure{
+		Database: "shop", Table: "orders",
+		Comment: "orders placed by customers",
+		Columns: []meta.ColumnDef{{Name: "id", Type: "int"}},
+	}
+	want := Desired{Columns: []Column{{Orig: "id", Name: "id", Type: "INT"}}}
+
+	// Absent means "leave it alone". A client that knows nothing about
+	// table comments must not silently clear one.
+	got, e := Diff(cur, want)
+	if e != nil {
+		t.Fatalf("Diff: %s", e)
+	}
+	if strings.Contains(got, "COMMENT") {
+		t.Errorf("a nil comment changed it:\n%s", got)
+	}
+
+	// The same comment is not a change either.
+	same := cur.Comment
+	want.Comment = &same
+	if got, e = Diff(cur, want); e != nil || strings.Contains(got, "COMMENT") {
+		t.Errorf("an unchanged comment produced a clause:\n%s", got)
+	}
+
+	// A new one is.
+	next := "one row per order"
+	want.Comment = &next
+	got, e = Diff(cur, want)
+	if e != nil {
+		t.Fatalf("Diff: %s", e)
+	}
+	if !strings.Contains(got, "COMMENT = 'one row per order'") {
+		t.Errorf("comment not written:\n%s", got)
+	}
+
+	// And clearing it is a change the caller can ask for explicitly.
+	empty := ""
+	want.Comment = &empty
+	got, e = Diff(cur, want)
+	if e != nil {
+		t.Fatalf("Diff: %s", e)
+	}
+	if !strings.Contains(got, "COMMENT = ''") {
+		t.Errorf("comment not cleared:\n%s", got)
+	}
+
+	// A quote in a comment is escaped, not interpolated.
+	tricky := "it's fine"
+	want.Comment = &tricky
+	got, e = Diff(cur, want)
+	if e != nil {
+		t.Fatalf("Diff: %s", e)
+	}
+	// mydb escapes with a backslash rather than by doubling; either is
+	// valid MySQL, and this is the one QuoteString has always used.
+	if !strings.Contains(got, `'it\'s fine'`) {
+		t.Errorf("quote not escaped:\n%s", got)
+	}
+}
+
+// TestBaseTypesAreAllAccepted keeps the list the editor offers and the list
+// the writer accepts from drifting apart: every type offered must survive a
+// round through Diff.
+func TestBaseTypesAreAllAccepted(t *testing.T) {
+	cur := &meta.Structure{Database: "shop", Table: "t"}
+	for _, ty := range BaseTypes() {
+		spec := ty
+		switch ty {
+		case "VARCHAR", "CHAR", "BINARY", "VARBINARY":
+			spec = ty + "(64)"
+		case "DECIMAL":
+			spec = "DECIMAL(10,2)"
+		case "ENUM", "SET":
+			spec = ty + "('a','b')"
+		case "BIT":
+			spec = "BIT(8)"
+		}
+		want := Desired{Columns: []Column{{Name: "c", Type: spec, Nullable: true}}}
+		if _, e := Diff(cur, want); e != nil {
+			t.Errorf("BaseTypes offers %q but Diff refuses %q: %s", ty, spec, e)
+		}
+	}
+}

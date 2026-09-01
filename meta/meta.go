@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,6 +160,7 @@ type Index struct {
 type Structure struct {
 	Database   string      `json:"database"`
 	Table      string      `json:"table"`
+	Comment    string      `json:"comment"`
 	CreateSQL  string      `json:"create_sql"`
 	Columns    []ColumnDef `json:"columns"`
 	Indexes    []Index     `json:"indexes"`
@@ -203,7 +205,42 @@ func Describe(ctx context.Context, q Querier, db, table string) (*Structure, err
 	if s.CreateSQL, e = createTable(ctx, q, qname); e != nil {
 		return nil, e
 	}
+	s.Comment = tableComment(s.CreateSQL)
 	return s, nil
+}
+
+// tableCommentRe matches a single-quoted COMMENT value. MySQL escapes a
+// quote inside one as \' rather than doubling it, and a backslash as \\,
+// so both have to be part of the match or a comment containing an
+// apostrophe is read as ending at it.
+var tableCommentRe = regexp.MustCompile(`COMMENT='((?:[^'\\]|\\.|'')*)'`)
+
+// unescapeSQL undoes what SHOW CREATE TABLE did to a quoted string.
+var unescapeSQL = strings.NewReplacer(
+	`\\`, `\`,
+	`\'`, `'`,
+	`\n`, "\n",
+	`\r`, "\r",
+	`\Z`, "\x1a",
+	`''`, `'`,
+)
+
+// tableComment reads the table's own comment out of SHOW CREATE TABLE
+// rather than spending another round-trip on it.
+//
+// Column comments live inside the parentheses and the table's options come
+// after the last closing one, so the tail is the only place this can look
+// without mistaking a column's comment for the table's.
+func tableComment(createSQL string) string {
+	i := strings.LastIndex(createSQL, "\n)")
+	if i < 0 {
+		return ""
+	}
+	m := tableCommentRe.FindStringSubmatch(createSQL[i:])
+	if m == nil {
+		return ""
+	}
+	return unescapeSQL.Replace(m[1])
 }
 
 // describeColumns reads SHOW FULL COLUMNS.

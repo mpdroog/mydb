@@ -137,9 +137,17 @@ function fieldFor(ctx, c, state, redraw) {
   }
 
   if (isBinary(c)) {
+    // Left out of the INSERT entirely, so what lands is whatever the
+    // schema says: its default, or NULL when it allows one. Shown as a
+    // placeholder rather than a value, because nobody typed it.
     dd.append(
-      h('input', { type: 'text', value: c.nullable ? 'NULL' : 'default', disabled: true, 'aria-label': c.name }),
-      h('span', { class: 'note', text: 'Binary — mydb does not write these; use the console.' }),
+      h('input', {
+        type: 'text',
+        placeholder: c.default != null ? String(c.default) : c.nullable ? 'NULL' : 'no default',
+        disabled: true,
+        'aria-label': c.name,
+      }),
+      h('span', { class: 'note', text: 'Binary — mydb does not write these; use a console.' }),
     );
     return [dt, dd];
   }
@@ -147,13 +155,17 @@ function fieldFor(ctx, c, state, redraw) {
   const members = enumMembers(c);
   const input = members
     ? h('select', { 'aria-label': c.name }, ...members.map((v) => h('option', { value: v, text: v })))
-    : h('input', { type: 'text', 'aria-label': c.name, placeholder: isNumeric(c) ? '0' : '' });
+    : h('input', { type: 'text', 'aria-label': c.name });
 
   if (st.mode === 'value') input.value = st.value ?? '';
-  // A default shows as a placeholder rather than a value: it says what
-  // will happen without claiming you typed it.
+  // The placeholder says what will be written if you type nothing, so it
+  // has to say the truth for each case. A numeric column showing a grey 0
+  // while it is set to NULL is the interface telling you the wrong thing:
+  // 0 and NULL are different values, and that is the whole reason the
+  // NULL button exists.
   if (st.mode === 'default' && !members) input.placeholder = String(c.default);
   if (st.mode === 'default' && members) input.value = String(c.default);
+  if (st.mode === 'null') input.placeholder = 'NULL';
   input.disabled = st.mode === 'null';
   input.addEventListener('input', () => {
     // Emptying a field that has a default hands it back to the server
@@ -188,6 +200,7 @@ function fieldFor(ctx, c, state, redraw) {
           ? { mode: 'null' }
           : (input.value ? { mode: 'value', value: input.value } : (hasDefault ? { mode: 'default' } : { mode: 'value', value: '' })));
         input.disabled = on;
+        input.placeholder = on ? 'NULL' : (hasDefault ? String(c.default) : '');
         if (!on) input.focus();
         redraw();
       },

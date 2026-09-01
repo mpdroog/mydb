@@ -4,7 +4,8 @@
 // dry-run first and puts the exact ALTER TABLE on screen. Applying then
 // runs as a normal job, so a long table-rebuild stays cancellable.
 
-import { h, clear, modal, toast, fmtMs, fmtProgress } from './dom.js';
+import { h, clear, modal, toast, copyText, fmtMs, fmtProgress } from './dom.js';
+import { crumb } from './crumb.js';
 import { api, aborted } from './api.js';
 import { runJob } from './state.js';
 import * as tabs from './tabs.js';
@@ -34,7 +35,7 @@ function build(pane, signal, ctx) {
       + 'back, which can take as long again as it has already run.',
   });
   const head = h('div', { class: 'pane-head' },
-    h('span', { class: 'muted mono', text: ctx.db + '.' + ctx.table }),
+    crumb(ctx.server, ctx.db, ctx.table),
     h('span', { class: 'grow' }), cancelBtn, createBtn, reloadBtn, applyBtn,
   );
 
@@ -49,25 +50,59 @@ function build(pane, signal, ctx) {
   let cols = [];        // editable column models
   let idxs = [];        // editable index models
   let pkText = null;
+  let tableComment = null;
+  let comment = '';
 
   // ---- rendering ----------------------------------------------------
 
   function colRow(c, i) {
     const name = h('input', { type: 'text', value: c.name });
-    const type = h('input', { type: 'text', value: c.type });
+    const type = h('input', {
+      type: 'text',
+      value: c.type,
+      list: 'mydb-types',
+      spellcheck: false,
+      title: 'A base type and its arguments, e.g. VARCHAR(255), DECIMAL(10,2), '
+        + "ENUM('a','b'). mydb writes only the types in the list and refuses "
+        + 'anything else rather than passing it to the server.',
+    });
     const nul = h('input', { type: 'checkbox', checked: c.nullable });
-    const def = h('input', { type: 'text', value: c.default === null ? '' : c.default, placeholder: 'NULL' });
-    const raw = h('input', { type: 'checkbox', checked: c.default_raw, title: 'Treat default as an expression' });
+    const def = h('input', { type: 'text', value: c.default === null ? '' : c.default });
+    const raw = h('input', {
+      type: 'checkbox',
+      checked: c.default_raw,
+      title: 'The default is an expression to evaluate, such as '
+        + 'CURRENT_TIMESTAMP or (UUID()), rather than a literal value to store.',
+    });
+
+    // What a blank default actually means depends on the column, so the
+    // placeholder says which of the three it is rather than always
+    // claiming NULL -- which is not even allowed on a NOT NULL column.
+    function syncDefault() {
+      const auto = /auto_increment/i.test(c.extra || '');
+      def.disabled = auto;
+      raw.disabled = auto;
+      def.placeholder = auto ? 'AUTO_INCREMENT'
+        : c.nullable ? 'NULL'
+        : 'no default';
+      def.title = auto
+        ? 'An AUTO_INCREMENT column takes its value from the server; it cannot have a default.'
+        : c.nullable
+          ? 'Blank means DEFAULT NULL.'
+          : 'Blank means no default at all: every INSERT has to name this column. '
+            + 'NULL is not available here because the column is NOT NULL.';
+    }
     const extra = h('select', {},
       ...EXTRAS.map((x) => h('option', { value: x, text: x || '—', selected: eqExtra(x, c.extra) })));
     const comment = h('input', { type: 'text', value: c.comment });
 
     name.addEventListener('input', () => { c.name = name.value; });
     type.addEventListener('input', () => { c.type = type.value; });
-    nul.addEventListener('change', () => { c.nullable = nul.checked; });
+    nul.addEventListener('change', () => { c.nullable = nul.checked; syncDefault(); });
     def.addEventListener('input', () => { c.default = def.value === '' ? null : def.value; });
     raw.addEventListener('change', () => { c.default_raw = raw.checked; });
-    extra.addEventListener('change', () => { c.extra = extra.value; });
+    extra.addEventListener('change', () => { c.extra = extra.value; syncDefault(); });
+    syncDefault();
     comment.addEventListener('input', () => { c.comment = comment.value; });
 
     const up = h('button', { type: 'button', title: 'Move up', text: '↑', onclick: () => moveCol(i, -1) });
@@ -91,7 +126,18 @@ function build(pane, signal, ctx) {
 
   function idxRow(x, i) {
     const name = h('input', { type: 'text', value: x.name });
-    const colsIn = h('input', { type: 'text', value: x.columns.join(', ') });
+    // An index over several columns is written as a list, and the order of
+    // that list is the index: (a, b) serves a lookup on a, and on a and b
+    // together, but not one on b alone.
+    const colsIn = h('input', {
+      type: 'text',
+      value: x.columns.join(', '),
+      list: 'mydb-cols',
+      placeholder: 'one or more, in order: customer_id, placed_at',
+      title: 'Several columns make one composite index, and their order '
+        + 'matters: (a, b) answers a lookup on a, and on a with b, but not '
+        + 'on b by itself.',
+    });
     const uniq = h('input', { type: 'checkbox', checked: x.unique });
 
     name.addEventListener('input', () => { x.name = name.value; });
@@ -110,9 +156,33 @@ function build(pane, signal, ctx) {
     );
   }
 
+  // Which section is on screen. Columns and indexes are separate jobs and
+  // a table with forty columns buries its indexes off the bottom of the
+  // page, where you stop remembering they are there.
+  let section = 'columns';
+
   function render() {
     clear(bodyEl);
     if (!current) return;
+
+    // The types mydb will write, and the columns this table has: both
+    // offered rather than left to be remembered.
+    const typeList = h('datalist', { id: 'mydb-types' },
+      ...(current.types || []).map((t) => h('option', { value: t })));
+    const colList = h('datalist', { id: 'mydb-cols' },
+      ...cols.map((c) => h('option', { value: c.name })));
+
+    const tab = (id, label, count) => h('button', {
+      class: 'sec-tab',
+      type: 'button',
+      'aria-selected': String(section === id),
+      onclick: () => { section = id; render(); },
+    }, label, count == null ? null : h('span', { class: 'n', text: String(count) }));
+
+    const tabsRow = h('div', { class: 'sec-tabs' },
+      tab('columns', 'Columns', cols.length),
+      tab('indexes', 'Indexes', idxs.length),
+      tab('table', 'Table'));
 
     const colTable = h('table', { class: 'st' },
       h('thead', {}, h('tr', {},
@@ -126,28 +196,71 @@ function build(pane, signal, ctx) {
       h('tbody', {}, ...idxs.map(idxRow)),
     );
 
-    pkText = h('input', { type: 'text', value: (current.primary_key || []).join(', '), placeholder: 'no primary key' });
+    pkText = h('input', {
+      type: 'text',
+      value: (current.primary_key || []).join(', '),
+      placeholder: 'no primary key',
+      list: 'mydb-cols',
+    });
+    tableComment = h('input', {
+      type: 'text',
+      value: comment,
+      placeholder: 'what one row of this table is',
+    });
+    tableComment.addEventListener('input', () => { comment = tableComment.value; });
 
-    bodyEl.append(
-      h('div', { class: 'st-title', text: 'Columns' }),
-      colTable,
-      h('div', {}, h('button', {
-        type: 'button', text: '+ column',
-        onclick: () => {
-          cols.push({ orig: '', name: 'new_column', type: 'VARCHAR(255)', nullable: true, default: null, default_raw: false, extra: '', comment: '' });
-          render();
-        },
-      })),
-      h('div', { class: 'st-title', text: 'Primary key' }),
-      pkText,
-      h('div', { class: 'st-title', text: 'Indexes' }),
-      idxTable,
-      h('div', {}, h('button', {
-        type: 'button', text: '+ index',
-        onclick: () => { idxs.push({ orig: '', name: 'idx_new', columns: [], unique: false }); render(); },
-      })),
-      h('p', { class: 'note', text: 'Foreign keys, partitions and engine/charset changes are shown in SHOW CREATE but not editable here.' }),
-    );
+    bodyEl.append(typeList, colList, tabsRow);
+
+    if (section === 'columns') {
+      bodyEl.append(
+        colTable,
+        h('div', {}, h('button', {
+          type: 'button', text: '+ column',
+          onclick: () => {
+            cols.push({ orig: '', name: 'new_column', type: 'VARCHAR(255)', nullable: true, default: null, default_raw: false, extra: '', comment: '' });
+            render();
+          },
+        })),
+      );
+    } else if (section === 'indexes') {
+      bodyEl.append(
+        h('div', { class: 'st-title', text: 'Primary key' }),
+        pkText,
+        h('p', {
+          class: 'note',
+          text: 'One column, or several separated by commas for a composite key.',
+        }),
+        h('div', { class: 'st-title', text: 'Secondary indexes' }),
+        idxTable,
+        h('div', {}, h('button', {
+          type: 'button', text: '+ index',
+          onclick: () => { idxs.push({ orig: '', name: 'idx_new', columns: [], unique: false }); render(); },
+        })),
+        h('p', {
+          class: 'note',
+          text: 'An index over several columns is one index, not several: put them '
+            + 'in the order you look them up in. (customer_id, placed_at) answers a '
+            + "query on the customer, and on the customer within a date range, but "
+            + 'not one on the date alone.',
+        }),
+      );
+    } else {
+      bodyEl.append(
+        h('div', { class: 'st-title', text: 'Table comment' }),
+        tableComment,
+        h('p', {
+          class: 'note',
+          text: 'Stored with the table and shown by SHOW CREATE TABLE. '
+            + 'A sentence saying what one row is tends to be worth more than the name.',
+        }),
+        h('div', { class: 'st-title', text: 'Not editable here' }),
+        h('p', {
+          class: 'note',
+          text: 'Foreign keys, partitions, and engine or charset changes appear in '
+            + 'SHOW CREATE but are not edited from this page. Use a console for those.',
+        }),
+      );
+    }
   }
 
   function moveCol(i, d) {
@@ -163,6 +276,7 @@ function build(pane, signal, ctx) {
     status.textContent = 'loading…';
     try {
       current = await api.structure(ctx.server, ctx.db, ctx.table, signal);
+      comment = current.comment || '';
       cols = (current.columns || []).map((c) => ({
         orig: c.name,
         name: c.name,
@@ -201,6 +315,7 @@ function build(pane, signal, ctx) {
         orig: x.orig, name: x.name.trim(), columns: x.columns, unique: !!x.unique,
       })),
       primary_key: splitList(pkText ? pkText.value : ''),
+      comment,
     };
   }
 
@@ -277,9 +392,19 @@ function build(pane, signal, ctx) {
 
   async function showCreate() {
     if (!current) return;
+    const sql = current.create_sql || '';
     const close = modal('CREATE TABLE ' + ctx.table,
-      h('pre', { class: 'sql', text: current.create_sql || '(none)' }),
-      [h('button', { type: 'button', text: 'Close', onclick: () => close() })],
+      h('pre', { class: 'sql', text: sql || '(none)' }),
+      [
+        // The reason to open this is almost always to put it somewhere
+        // else: a migration, a ticket, another server.
+        h('button', {
+          class: 'btn', type: 'button', text: 'Copy',
+          disabled: !sql,
+          onclick: () => copyText(sql),
+        }),
+        h('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => close() }),
+      ],
     );
   }
 

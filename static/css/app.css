@@ -1507,3 +1507,46 @@ table.st td.narrow .btn { margin: 0 2px; }
   .gr .gc.kill button { opacity: 1; }
   .srv .icon { opacity: 1; }
 }
+
+/* A field showing what it will write if you type nothing. NULL is a value,
+   not an absent one, so it is not drawn as faint as an ordinary hint. */
+.fields dd > input:disabled::placeholder {
+  color: var(--ink-2);
+  font: 500 10px/1 var(--cond);
+  letter-spacing: .12em;
+}
+
+/* ============================================================
+   structure editor sections
+   Columns and indexes are separate jobs, and a table with forty columns
+   buries its indexes off the bottom of the page where you stop
+   remembering they are there.
+   ============================================================ */
+
+.sec-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--hair); }
+.sec-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-3);
+  padding: 7px 12px;
+  font: 500 12.5px/1 var(--sans);
+  margin-bottom: -1px;
+}
+.sec-tab:hover { color: var(--ink-2); }
+.sec-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.sec-tab .n {
+  font: 400 10.5px/1 var(--mono);
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 3px 6px;
+}
+.sec-tab[aria-selected="true"] .n { color: var(--accent); background: var(--accent-wash); }
+
+/* A disabled default is not an empty one: it is a value the server owns. */
+table.st input:disabled::placeholder { color: var(--ink-3); font-style: normal; }

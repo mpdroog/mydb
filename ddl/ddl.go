@@ -42,6 +42,25 @@ type Desired struct {
 	Columns    []Column `json:"columns"`
 	Indexes    []Index  `json:"indexes"`
 	PrimaryKey []string `json:"primary_key"`
+	// Comment is the table's own comment. A pointer so that "leave it
+	// alone" and "set it to empty" are different requests: a caller that
+	// does not know about table comments must not silently clear one.
+	Comment *string `json:"comment,omitempty"`
+}
+
+// BaseTypes are the column types mydb will write, in the order a person
+// looks for them rather than alphabetically. Anything outside this set is
+// refused rather than passed through to the server, so the editor can
+// offer exactly this list and nothing it offers can be rejected.
+func BaseTypes() []string {
+	return []string{
+		"INT", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT",
+		"DECIMAL", "FLOAT", "DOUBLE", "BIT",
+		"VARCHAR", "CHAR", "TEXT", "TINYTEXT", "MEDIUMTEXT", "LONGTEXT",
+		"DATE", "DATETIME", "TIMESTAMP", "TIME", "YEAR",
+		"ENUM", "SET", "JSON",
+		"BINARY", "VARBINARY", "BLOB", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB",
+	}
 }
 
 // baseTypes is the set of column types mydb will write. Anything outside
@@ -71,10 +90,10 @@ var numArgsRe = regexp.MustCompile(`^\s*\d+\s*(,\s*\d+\s*)?$`)
 
 // extras are the column attributes the editor may set.
 var extras = map[string]string{
-	"":                             "",
-	"AUTO_INCREMENT":               "AUTO_INCREMENT",
-	"ON UPDATE CURRENT_TIMESTAMP":  "ON UPDATE CURRENT_TIMESTAMP",
-	"DEFAULT_GENERATED":            "",
+	"":                              "",
+	"AUTO_INCREMENT":                "AUTO_INCREMENT",
+	"ON UPDATE CURRENT_TIMESTAMP":   "ON UPDATE CURRENT_TIMESTAMP",
+	"DEFAULT_GENERATED":             "",
 	"ON UPDATE CURRENT_TIMESTAMP()": "ON UPDATE CURRENT_TIMESTAMP",
 }
 
@@ -331,6 +350,16 @@ func Diff(cur *meta.Structure, want Desired) (string, error) {
 		return "", e
 	}
 	clauses = append(clauses, pkc...)
+
+	// The table's own comment, which is not a column and not an index and
+	// so has nowhere else to go.
+	if want.Comment != nil && *want.Comment != cur.Comment {
+		q, e := QuoteString(*want.Comment)
+		if e != nil {
+			return "", fmt.Errorf("ddl.Diff comment: %w", e)
+		}
+		clauses = append(clauses, "COMMENT = "+q)
+	}
 
 	if len(clauses) == 0 {
 		return "", nil

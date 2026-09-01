@@ -6,6 +6,7 @@ import (
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/mpdroog/mydb/config"
+	"github.com/mpdroog/mydb/ddl"
 	"github.com/mpdroog/mydb/meta"
 	"github.com/mpdroog/mydb/writer"
 )
@@ -93,7 +94,14 @@ func (a *API) Structure(w http.ResponseWriter, r *http.Request, _ httprouter.Par
 		writer.Err(w, http.StatusBadGateway, "api.Structure failed reading structure", e)
 		return
 	}
-	if e := writer.Encode(w, out); e != nil {
+	// The editor offers exactly the types the writer accepts, so nothing it
+	// can suggest gets refused on apply. Sending them here rather than from
+	// their own endpoint keeps it to the round-trip the editor already makes.
+	body := struct {
+		*meta.Structure
+		Types []string `json:"types"`
+	}{out, ddl.BaseTypes()}
+	if e := writer.Encode(w, body); e != nil {
 		writer.Err(w, http.StatusInternalServerError, "api.Structure failed encoding", e)
 	}
 }
