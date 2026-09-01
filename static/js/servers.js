@@ -47,10 +47,20 @@ export function serverMenu(s, anchor, actions) {
     }, 'danger'),
   );
 
-  const box = anchor.getBoundingClientRect();
+  // Anchor to the button, then keep the whole menu on screen. A sidebar
+  // is near the left edge on a desktop and near the right one on a narrow
+  // device, and a menu that opens past the edge is a menu you cannot use.
   menu.hidden = false;
-  menu.style.left = box.left + 'px';
-  menu.style.top = (box.bottom + 4) + 'px';
+  const box = anchor.getBoundingClientRect();
+  const size = menu.getBoundingClientRect();
+  const pad = 8;
+  const left = Math.max(pad, Math.min(box.left, window.innerWidth - size.width - pad));
+  const below = box.bottom + 4;
+  const top = below + size.height + pad > window.innerHeight
+    ? Math.max(pad, box.top - size.height - 4)   // flip above rather than run off the bottom
+    : below;
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
 
   const hide = () => {
     menu.hidden = true;

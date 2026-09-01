@@ -77,7 +77,16 @@ button:disabled { opacity: .45; cursor: default; }
   border-right: 1px solid var(--hair);
 }
 
-#tree { grid-row: 1; overflow: auto; min-height: 0; padding: 8px 6px; }
+/* Never sideways. A row that does not fit must give way inside itself --
+   scrolling the tree horizontally puts the controls at the end of a row
+   somewhere off the edge, where on a touch screen they are simply gone. */
+#tree {
+  grid-row: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 8px 6px;
+}
 
 .side-foot {
   grid-row: 2;
@@ -118,8 +127,33 @@ button:disabled { opacity: .45; cursor: default; }
 }
 #tree > .srv:first-child { margin-top: 0; }
 .srv:hover { background: var(--sunken); }
-.srv .name { font-weight: 500; font-size: 12.5px; }
-.srv .meta { margin-left: auto; font: 400 10.5px/1 var(--mono); color: var(--ink-3); }
+
+/* Everything in a row that can give way, does; the controls at the end
+   never do. A long server version is the case that broke this: it is the
+   least important thing on the row and was pushing the most important one
+   out of reach. */
+.srv, .db, .grp, .tbl { overflow: hidden; }
+.srv .name { font-weight: 500; font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.srv .meta {
+  margin-left: auto;
+  font: 400 10.5px/1 var(--mono);
+  color: var(--ink-3);
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srv .icon, .srv .prod-badge, .srv .flavor, .srv .led, .srv .twist { flex: none; }
+
+/* The same for a database or table with a long name. */
+.db > span:not(.twist):not(.enc):not(.n),
+.grp > span:not(.twist):not(.n),
+.tbl > span:not(.view-mark):not(.rows):not(.enc) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tbl .rows, .grp .n, .db .n { flex: none; }
 
 .db  { height: 21px; padding: 0 6px 0 20px; color: var(--ink-2); font-size: 12.5px; }
 .grp { height: 21px; padding: 0 6px 0 20px; color: var(--ink-2); font: 400 12px/1 var(--mono); }
@@ -1451,3 +1485,16 @@ table.st td.narrow .btn { margin: 0 2px; }
 .shape .base  { stroke: var(--hair-2); stroke-width: 1; }
 
 .grid-tools button[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ============================================================
+   no hover, no hiding
+   Revealing a control on hover is fine with a pointer and is simply a
+   control that does not exist on a touch screen. Anything hidden that way
+   is shown permanently where the device cannot hover.
+   ============================================================ */
+
+@media (hover: none), (pointer: coarse) {
+  .chip .x { opacity: 1; }
+  .gr .gc.kill button { opacity: 1; }
+  .srv .icon { opacity: 1; }
+}

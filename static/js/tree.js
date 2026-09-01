@@ -41,6 +41,17 @@ function encodingIssue(t, db) {
   return null;
 }
 
+// shortVersion keeps the part of a version string that identifies the
+// server and drops the packaging. A distro appends its own build to it --
+// 8.0.46-0ubuntu0.24.04.1 -- and in a 236px sidebar that suffix is longer
+// than everything else on the row put together. The whole string stays in
+// the tooltip.
+function shortVersion(v) {
+  if (!v) return '';
+  const m = /^(\d+\.\d+\.\d+)/.exec(String(v));
+  return m ? m[1] : String(v).split('-')[0];
+}
+
 // dbOf finds the database record a table belongs to, so its encoding has
 // something to be compared against.
 function dbOf(server, dbName) {
@@ -152,7 +163,10 @@ function serverRow(s) {
     flavorBadge(s),
     h('span', { class: 'name' }, s.name),
     s.production ? h('span', { class: 'prod-badge', text: 'PROD' }) : null,
-    h('span', { class: 'meta' }, s.status?.version || ''));
+    h('span', {
+      class: 'meta',
+      title: s.status?.version || '',
+    }, shortVersion(s.status?.version)));
 
   row.append(h('button', {
     class: 'icon srv-act',
