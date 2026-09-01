@@ -65,8 +65,9 @@ function bindKeys() {
     openStructure(c.server, c.db, c.table);
   }, { inField: true, group: 'Open', desc: 'Structure editor for the current table' });
 
-  keymap.bind('mod+t', () => {
+  keymap.bind('mod+t', async () => {
     const c = context();
+    if (c.server && !c.db) { openConsoleFor(c.server); return; }
     openConsole(c.server, c.db, '');
   }, { inField: true, group: 'Open', desc: 'New SQL console' });
 
@@ -160,20 +161,41 @@ function wireChrome() {
   window.addEventListener('beforeunload', () => page.abort());
 }
 
-// openSchemaFor picks a database to draw. The diagram is per-schema, and
-// a server-level menu item that asked "which one?" first would be a worse
-// answer than opening the obvious one.
-async function openSchemaFor(server) {
+// SYSTEM_DBS are the schemas nobody means when they say "open a console
+// on this server".
+const SYSTEM_DBS = /^(information_schema|performance_schema|mysql|sys)$/;
+
+// pickDb works out which database an action on a server should act on.
+// Opening a console with the server filled in and the database left blank
+// is half an answer: the next thing you do is always type the database.
+async function pickDb(server) {
   const c = sidebar.selection();
-  if (c.server === server && c.db) { openERM(server, c.db); return; }
+  if (c.server === server && c.db) return c.db;
+
+  // Whatever is open and belongs to this server is a better guess than
+  // alphabetical order.
+  for (const t of tabs.all()) {
+    if (t.server === server && t.api?.ctx?.db) return t.api.ctx.db;
+  }
   try {
     const dbs = await api.databases(server, page.signal);
-    const first = dbs.find((d) => !/^(information_schema|performance_schema|mysql|sys)$/.test(d.name));
-    if (!first) { toast('No schema to draw on ' + server); return; }
-    openERM(server, first.name);
+    return dbs.find((d) => !SYSTEM_DBS.test(d.name))?.name || dbs[0]?.name || '';
   } catch (e) {
     if (!aborted(e)) toast(e.message, 'err');
+    return '';
   }
+}
+
+// The diagram is per-schema, so a server-level menu item has to choose
+// one. Asking "which?" first is a worse answer than opening the obvious.
+async function openSchemaFor(server) {
+  const db = await pickDb(server);
+  if (!db) { toast('No schema to draw on ' + server); return; }
+  openERM(server, db);
+}
+
+async function openConsoleFor(server) {
+  openConsole(server, await pickDb(server), '');
 }
 
 // tunnel says how the sidebar's footer describes the connections: how many
@@ -198,7 +220,7 @@ async function main() {
       health: openDashboard,
       log: (name) => openQueryLog({ server: name }),
       schema: (name) => openSchemaFor(name),
-      console: (name) => openConsole(name, '', ''),
+      console: openConsoleFor,
       edit: editServer,
     }),
   });

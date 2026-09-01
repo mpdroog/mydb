@@ -42,7 +42,12 @@ button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--ink-3); }
 button:disabled, input:disabled, select:disabled { opacity: .5; cursor: default; }
 input::placeholder, textarea::placeholder { color: var(--ink-3); }
-input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+/* Focus marks the border and nothing else. Setting a background here also
+   set it on controls whose class had deliberately asked for none -- and
+   the statement band is a transparent textarea over a syntax-coloured
+   mirror, so an opaque background on focus hid every character the moment
+   you clicked into it. */
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
 
 /* A tick box has no use for a border, a radius or 4px/8px of padding, and
    a browser paints that background straight over the widget. Undo it and
@@ -1550,3 +1555,22 @@ table.st td.narrow .btn { margin: 0 2px; }
 
 /* A disabled default is not an empty one: it is a value the server owns. */
 table.st input:disabled::placeholder { color: var(--ink-3); font-style: normal; }
+
+/* The table comment gets the width the pane has. It was a single-line box
+   in the middle of an empty page, which reads as a field for a word. */
+.comment-box {
+  display: block;
+  width: 100%;
+  max-width: 900px;
+  min-height: 96px;
+  resize: vertical;
+  font: 400 13px/1.6 var(--sans);
+  padding: 9px 11px;
+}
+
+/* A column type is a base and its arguments: a list of what mydb will
+   write, and a box for what goes in the brackets. */
+.ty-cell { display: flex; gap: 6px; align-items: center; }
+.ty-base { flex: 0 0 auto; max-width: 140px; font: 400 12px/1 var(--mono); }
+.ty-args { flex: 1 1 auto; min-width: 0; font: 400 12px/1 var(--mono); }
+.ty-args::placeholder { font-family: var(--sans); font-size: 11px; }

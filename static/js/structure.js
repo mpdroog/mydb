@@ -26,9 +26,11 @@ export function openStructure(server, db, table) {
 function build(pane, signal, ctx) {
   pane.classList.add('struct-pane');
 
-  const applyBtn = h('button', { type: 'button', text: 'Preview changes…' });
-  const reloadBtn = h('button', { type: 'button', text: 'Reload' });
-  const createBtn = h('button', { type: 'button', text: 'SHOW CREATE' });
+  const applyBtn = h('button', { class: 'btn primary', type: 'button', text: 'Preview changes…' });
+  const reloadBtn = h('button', { class: 'btn ghost', type: 'button' },
+    'Reload', h('span', { class: 'key', text: 'Ctrl+R' }));
+  const createBtn = h('button', { class: 'btn ghost', type: 'button' },
+    'SHOW CREATE', h('span', { class: 'key', text: 'Ctrl+Shift+C' }));
   const cancelBtn = h('button', {
     type: 'button', class: 'danger', text: 'Cancel', hidden: true,
     title: 'Abort the running statement. A table rebuild then has to roll '
@@ -57,15 +59,37 @@ function build(pane, signal, ctx) {
 
   function colRow(c, i) {
     const name = h('input', { type: 'text', value: c.name });
-    const type = h('input', {
+    // A type is a base and its arguments, so it is two controls: a list of
+    // the types mydb will actually write, and a box for what goes in the
+    // brackets. Free text meant guessing at both, and guessing wrong was
+    // only found out on apply.
+    const parsed = splitType(c.type);
+    const base = h('select', { class: 'ty-base' },
+      ...(current?.types || []).map((t) => h('option', { value: t, text: t })),
+      // A type the table already has that mydb does not offer stays
+      // selectable rather than being silently rewritten to something else.
+      (current?.types || []).includes(parsed.base)
+        ? null
+        : h('option', { value: parsed.base, text: parsed.base + ' (as found)' }));
+    base.value = parsed.base;
+
+    const args = h('input', {
+      class: 'ty-args',
       type: 'text',
-      value: c.type,
-      list: 'mydb-types',
+      value: parsed.args,
       spellcheck: false,
-      title: 'A base type and its arguments, e.g. VARCHAR(255), DECIMAL(10,2), '
-        + "ENUM('a','b'). mydb writes only the types in the list and refuses "
-        + 'anything else rather than passing it to the server.',
+      placeholder: argHint(parsed.base),
+      title: 'What goes in the brackets: a length, a precision and scale, or '
+        + 'the members of an enum. Leave it empty for a type that takes none.',
     });
+
+    function syncType() {
+      c.type = args.value.trim() ? base.value + '(' + args.value.trim() + ')' : base.value;
+      args.placeholder = argHint(base.value);
+      type.value = c.type;
+    }
+    // Kept so the rest of the row, and the preview, still read one value.
+    const type = h('input', { type: 'hidden', value: c.type });
     const nul = h('input', { type: 'checkbox', checked: c.nullable });
     const def = h('input', { type: 'text', value: c.default === null ? '' : c.default });
     const raw = h('input', {
@@ -97,7 +121,8 @@ function build(pane, signal, ctx) {
     const comment = h('input', { type: 'text', value: c.comment });
 
     name.addEventListener('input', () => { c.name = name.value; });
-    type.addEventListener('input', () => { c.type = type.value; });
+    base.addEventListener('change', syncType);
+    args.addEventListener('input', syncType);
     nul.addEventListener('change', () => { c.nullable = nul.checked; syncDefault(); });
     def.addEventListener('input', () => { c.default = def.value === '' ? null : def.value; });
     raw.addEventListener('change', () => { c.default_raw = raw.checked; });
@@ -114,7 +139,7 @@ function build(pane, signal, ctx) {
 
     return h('tr', {},
       h('td', {}, name),
-      h('td', {}, type),
+      h('td', { class: 'ty-cell' }, base, args, type),
       h('td', { class: 'narrow' }, nul),
       h('td', {}, def),
       h('td', { class: 'narrow' }, raw),
@@ -202,11 +227,15 @@ function build(pane, signal, ctx) {
       placeholder: 'no primary key',
       list: 'mydb-cols',
     });
-    tableComment = h('input', {
-      type: 'text',
-      value: comment,
-      placeholder: 'what one row of this table is',
+    tableComment = h('textarea', {
+      class: 'comment-box',
+      rows: 5,
+      spellcheck: true,
+      placeholder: 'What one row of this table is, and anything the column '
+        + 'names do not say. Whoever reads this next will not have the context '
+        + 'you have now.',
     });
+    tableComment.value = comment;
     tableComment.addEventListener('input', () => { comment = tableComment.value; });
 
     bodyEl.append(typeList, colList, tabsRow);
@@ -260,6 +289,29 @@ function build(pane, signal, ctx) {
             + 'SHOW CREATE but are not edited from this page. Use a console for those.',
         }),
       );
+    }
+  }
+
+  // splitType takes VARCHAR(300) apart into its base and its arguments,
+  // keeping anything it does not understand as the base so a type mydb
+  // did not write is never quietly replaced.
+  function splitType(t) {
+    const m = /^\s*([A-Za-z ]+?)\s*\((.*)\)\s*$/.exec(String(t || ''));
+    if (!m) return { base: String(t || '').trim().toUpperCase(), args: '' };
+    return { base: m[1].trim().toUpperCase(), args: m[2].trim() };
+  }
+
+  // argHint says what the brackets are for, per type, rather than leaving
+  // it to be remembered.
+  function argHint(base) {
+    switch (base) {
+      case 'VARCHAR': case 'CHAR': case 'VARBINARY': case 'BINARY': return 'length, e.g. 255';
+      case 'DECIMAL': case 'NUMERIC': return 'precision, scale — e.g. 10,2';
+      case 'ENUM': case 'SET': return "'a','b','c'";
+      case 'BIT': return 'bits, e.g. 8';
+      case 'DATETIME': case 'TIMESTAMP': case 'TIME': return 'fractional digits, 0-6';
+      case 'FLOAT': case 'DOUBLE': return 'optional';
+      default: return 'none';
     }
   }
 
@@ -398,10 +450,21 @@ function build(pane, signal, ctx) {
       [
         // The reason to open this is almost always to put it somewhere
         // else: a migration, a ticket, another server.
+        // Copying is silent by nature: nothing on screen changes, so the
+        // only way to know it worked is to be told.
         h('button', {
           class: 'btn', type: 'button', text: 'Copy',
           disabled: !sql,
-          onclick: () => copyText(sql),
+          onclick: (ev) => {
+            const btn = ev.currentTarget;
+            copyText(sql)
+              .then(() => {
+                btn.textContent = 'Copied';
+                toast('CREATE TABLE copied — ' + sql.split('\n').length + ' lines', 'ok');
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+              })
+              .catch((e) => toast('Could not copy: ' + e.message, 'err'));
+          },
         }),
         h('button', { class: 'btn', type: 'button', text: 'Close', onclick: () => close() }),
       ],
