@@ -136,12 +136,28 @@ function* sidebarServers() {
   }
 }
 
+// closeAll clears the work that costs nothing to reopen, and asks only
+// about the work that does.
+//
+// A table you browsed and a schema you looked at can be opened again in a
+// click. A statement you wrote over the generated one, a console you typed
+// into, an ALTER you assembled and have not applied: those exist nowhere
+// else, and losing them to a button meant for tidying up is the kind of
+// thing you only forgive once. So the question names them.
 function closeAll() {
-  // Anything still running is worth one question: closing the tab of a
-  // schema change leaves it running, but closing the tab of a query does
-  // cancel it.
-  if (tabs.count() > 2 && !confirm('Close all ' + tabs.count() + ' tabs?')) return;
-  tabs.closeAll();
+  const dirty = tabs.all().filter((t) => {
+    try { return !!t.api?.dirty?.(); } catch { return false; }
+  });
+  for (const t of tabs.all()) {
+    if (!dirty.includes(t)) tabs.close(t.id);
+  }
+  if (!dirty.length) return;
+
+  const names = dirty.map((t) => t.title).join(', ');
+  const ask = dirty.length === 1
+    ? `${names} has changes you made and nothing else has a copy of them.\n\nClose it too?`
+    : `${dirty.length} of these have changes you made, and nothing else has a copy of them:\n\n  ${dirty.map((t) => t.title).join('\n  ')}\n\nClose them too?`;
+  if (confirm(ask)) for (const t of dirty) tabs.close(t.id);
 }
 
 function wireChrome() {

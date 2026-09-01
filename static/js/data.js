@@ -127,6 +127,9 @@ function build(pane, signal, tab, ctx) {
   return {
     kind: 'data',
     ctx,
+    // A statement you wrote over the generated one is yours, and closing
+    // the pane is the only thing that forgets it.
+    dirty: () => stmt.dirty(),
     onShow: () => grid.focusGrid(),
     cancel: () => job?.cancel(),
     reload: load,

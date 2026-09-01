@@ -54,6 +54,10 @@ function build(pane, signal, ctx) {
   let pkText = null;
   let tableComment = null;
   let comment = '';
+  // Held outside the DOM because render() rebuilds the inputs, and a
+  // section switch must not throw away what was typed in another one.
+  let pk = '';
+  let pristine = '';
 
   // ---- rendering ----------------------------------------------------
 
@@ -223,10 +227,11 @@ function build(pane, signal, ctx) {
 
     pkText = h('input', {
       type: 'text',
-      value: (current.primary_key || []).join(', '),
+      value: pk,
       placeholder: 'no primary key',
       list: 'mydb-cols',
     });
+    pkText.addEventListener('input', () => { pk = pkText.value; });
     tableComment = h('textarea', {
       class: 'comment-box',
       rows: 5,
@@ -329,6 +334,7 @@ function build(pane, signal, ctx) {
     try {
       current = await api.structure(ctx.server, ctx.db, ctx.table, signal);
       comment = current.comment || '';
+      pk = (current.primary_key || []).join(', ');
       cols = (current.columns || []).map((c) => ({
         orig: c.name,
         name: c.name,
@@ -343,6 +349,10 @@ function build(pane, signal, ctx) {
         orig: x.name, name: x.name, columns: [...x.columns], unique: x.unique,
       }));
       render();
+      // What the table looked like when it was read, so "has this been
+      // edited" is a comparison rather than a flag someone has to remember
+      // to set in every handler.
+      pristine = JSON.stringify(desired());
       status.textContent = cols.length + ' columns · ' + idxs.length + ' indexes';
     } catch (e) {
       if (aborted(e)) return;
@@ -366,7 +376,7 @@ function build(pane, signal, ctx) {
       indexes: idxs.map((x) => ({
         orig: x.orig, name: x.name.trim(), columns: x.columns, unique: !!x.unique,
       })),
-      primary_key: splitList(pkText ? pkText.value : ''),
+      primary_key: splitList(pk),
       comment,
     };
   }
@@ -481,6 +491,9 @@ function build(pane, signal, ctx) {
   return {
     kind: 'struct',
     ctx,
+    // Unapplied schema edits are the most expensive thing in the app to
+    // lose: they are not in any history and cannot be retyped from memory.
+    dirty: () => !!pristine && JSON.stringify(desired()) !== pristine,
     reload: load,
     cancel: () => job?.cancel(),
     // No dispose() that kills the job: an ALTER keeps running when its tab

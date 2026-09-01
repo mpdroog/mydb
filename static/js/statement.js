@@ -80,7 +80,15 @@ export function describe(sql) {
 
 const MAX_LINES = 10;
 
-export function createStatement({ onRun, label = 'the statement mydb wrote' } = {}) {
+// strip and foot are optional because the console already has a result
+// strip of its own and no generated statement to have diverged from. It
+// wants the editor and nothing else.
+export function createStatement({
+  onRun,
+  label = 'the statement mydb wrote',
+  strip: wantStrip = true,
+  foot: wantFoot = true,
+} = {}) {
   const gutter = h('div', { class: 'stmt-gutter' });
   const mirror = h('pre', { class: 'stmt-mirror', 'aria-hidden': 'true' });
   const input = h('textarea', {
@@ -95,7 +103,9 @@ export function createStatement({ onRun, label = 'the statement mydb wrote' } = 
   const resetBtn = h('button', { type: 'button', text: 'Reset' });
   const foot = h('div', { class: 'stmt-foot' }, meta, h('span', { class: 'grow' }), resetBtn);
   const strip = h('div', { class: 'results', hidden: true });
-  const el = h('div', { class: 'stmt' }, box, strip, foot);
+  const el = h('div', { class: 'stmt' }, box,
+    wantStrip ? strip : null,
+    wantFoot ? foot : null);
 
   let baseline = '';
   let stmts = [];
@@ -132,6 +142,7 @@ export function createStatement({ onRun, label = 'the statement mydb wrote' } = 
     drawStrip();
 
     const dirty = text.trim() !== baseline.trim();
+    if (!wantFoot) return;
     clear(meta);
     const lines = text.split('\n').length;
     meta.append(lines + (lines === 1 ? ' line' : ' lines')
@@ -163,6 +174,7 @@ export function createStatement({ onRun, label = 'the statement mydb wrote' } = 
   // The strip is a map of the buffer. One statement means there is nothing
   // to map, so it does not appear -- the pane's footer already describes it.
   function drawStrip() {
+    if (!wantStrip) return;
     clear(strip);
     strip.hidden = stmts.length < 2;
     if (strip.hidden) return;
@@ -224,6 +236,9 @@ export function createStatement({ onRun, label = 'the statement mydb wrote' } = 
     activeIndex: () => activeIdx,
     activeStatement: () => (stmts.length ? input.value.slice(stmts[activeIdx].start, stmts[activeIdx].end) : ''),
     setOutcomes(list) { outcomes = list || []; sync(true); },
+    // For a caller that sets .value on the textarea directly: the mirror
+    // is only redrawn on events the user causes.
+    sync: () => sync(true),
     onPick(fn) { onPick = fn; },
     focus: () => input.focus(),
   };

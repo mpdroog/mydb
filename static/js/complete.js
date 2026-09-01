@@ -36,9 +36,13 @@ const MINAUTO = 2;
 
 // attach wires completion onto a textarea. getContext returns the server
 // and database the console is currently pointed at.
-export function attach(editor, getContext) {
+// mount is where the popup lives. It defaults to the editor's own parent,
+// which is right for a plain textarea; the statement band scrolls its box,
+// and an absolutely-positioned popup inside a scrolling box is clipped by
+// it, so that caller hands in the wrapper instead.
+export function attach(editor, getContext, mount) {
   const pop = h('div', { class: 'complete', hidden: true });
-  editor.parentNode.append(pop);
+  (mount || editor.parentNode).append(pop);
 
   let items = [];
   let cursor = 0;

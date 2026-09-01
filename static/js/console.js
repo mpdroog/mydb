@@ -27,6 +27,8 @@ import * as schema from './schema.js';
 import { openQueryLog } from './querylog.js';
 import * as explain from './explain.js';
 import * as tabs from './tabs.js';
+import { createStatement } from './statement.js';
+import { crumb } from './crumb.js';
 
 const HKEY = 'mydb.history';
 const HMAX = 200;
@@ -79,24 +81,24 @@ function build(pane, signal, ctx) {
     histBtn, explainBtn, analyzeBtn, cancelBtn, allBtn, runBtn,
   );
 
-  const editor = h('textarea', {
-    class: 'sql-edit',
-    spellcheck: false,
-    placeholder: 'SELECT …    (Ctrl/Cmd+Enter runs the statement the cursor is in; '
-      + 'table and column names complete as you type)',
-    value: ctx.sql,
-  });
-  // The editor and its popup share a positioned box.
-  const editBox = h('div', { class: 'edit-box' }, editor);
+  // The same editor the table view uses, so SQL is coloured in the one
+  // place people write the most of it. The band's own result strip and
+  // footer are off: the console has a strip of its own, driven by what
+  // actually ran, and no generated statement to have diverged from.
+  const band = createStatement({ onRun: () => run(), strip: false, foot: false });
+  const editor = band.input;
+  editor.placeholder = 'SELECT \u2026    (Ctrl/Cmd+Enter runs the statement the cursor '
+    + 'is in; table and column names complete as you type)';
+  band.set(ctx.sql || '');
 
   const strip = h('div', { class: 'results', hidden: true });
   const grid = createGrid();
   const status = h('span', { class: 'muted', text: 'ready' });
   const foot = h('div', { class: 'pane-foot' }, status);
 
-  pane.append(head, editBox, strip, grid.el, foot);
+  pane.append(head, band.el, strip, grid.el, foot);
 
-  attach(editor, () => ({ server: srvSel.value, db: dbIn.value.trim() }));
+  attach(editor, () => ({ server: srvSel.value, db: dbIn.value.trim() }), band.el);
 
   // Warm the table list now rather than on the first Ctrl+Space. Completion
   // never waits on the network, so a cold cache means the first press
@@ -341,13 +343,13 @@ function build(pane, signal, ctx) {
       const list = loadHistory();
       if (!list.length) return;
       histIdx = Math.min(histIdx + 1, list.length - 1);
-      editor.value = list[histIdx].sql;
+      band.set(list[histIdx].sql);
       ev.preventDefault();
     }
     if (ev.key === 'ArrowDown' && histIdx >= 0) {
       const list = loadHistory();
       histIdx -= 1;
-      editor.value = histIdx < 0 ? '' : list[histIdx].sql;
+      band.set(histIdx < 0 ? '' : list[histIdx].sql);
       ev.preventDefault();
     }
   });
@@ -360,13 +362,22 @@ function build(pane, signal, ctx) {
   histBtn.addEventListener('click', () => openQueryLog({ server: srvSel.value }));
 
   if (isProduction(ctx.server)) pane.classList.add('prod');
-  editor.focus();
+  band.focus();
   updateAllBtn().catch(() => {});
+
+  const opened = (ctx.sql || '').trim();
 
   return {
     kind: 'sql',
     ctx,
-    onShow: () => editor.focus(),
+    // A console holds whatever you typed into it and nothing else knows
+    // about it. Unchanged from what it opened with -- or empty -- is not
+    // worth asking about.
+    dirty: () => {
+      const now = editor.value.trim();
+      return !!now && now !== opened;
+    },
+    onShow: () => band.focus(),
     run,
     cancel: () => { stopped = true; job?.cancel(); },
     dispose: () => job?.dispose(),

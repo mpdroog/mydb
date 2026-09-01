@@ -1574,3 +1574,17 @@ table.st input:disabled::placeholder { color: var(--ink-3); font-style: normal; 
 .ty-base { flex: 0 0 auto; max-width: 140px; font: 400 12px/1 var(--mono); }
 .ty-args { flex: 1 1 auto; min-width: 0; font: 400 12px/1 var(--mono); }
 .ty-args::placeholder { font-family: var(--sans); font-size: 11px; }
+
+/* The band's wrapper is the completion popup's containing block: the box
+   inside it scrolls, and an absolutely-positioned popup in a scrolling box
+   is clipped by it. */
+.stmt { position: relative; }
+
+/* The console adds a result strip between the band and the grid, so its
+   rows are pinned separately from a table pane's. */
+.pane.sql { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.pane.sql > .pane-head { grid-row: 1; }
+.pane.sql > .stmt      { grid-row: 2; }
+.pane.sql > .results   { grid-row: 3; }
+.pane.sql > .gridwrap  { grid-row: 4; }
+.pane.sql > .pane-foot { grid-row: 5; }
