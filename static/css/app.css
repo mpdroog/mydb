@@ -25,9 +25,40 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-button, input, select, textarea { font: inherit; color: inherit; }
+/* Every control gets a readable default, not only the ones with a class.
+   Most of the interface builds plain <button> and <input> elements; left
+   to the browser they come out on a light background with this page's
+   near-white ink, which is unreadable. Classed variants below override
+   these, and win on specificity. */
+button, input, select, textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
 button { cursor: pointer; }
-button:disabled { opacity: .45; cursor: default; }
+button:hover:not(:disabled) { border-color: var(--ink-3); }
+button:disabled, input:disabled, select:disabled { opacity: .5; cursor: default; }
+input::placeholder, textarea::placeholder { color: var(--ink-3); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+
+/* A tick box has no use for a border, a radius or 4px/8px of padding, and
+   a browser paints that background straight over the widget. Undo it and
+   let the browser draw its own, at its own size. */
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 :focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
 
 /* ============================================================
@@ -367,29 +398,18 @@ kbd, .key {
 }
 .btn.primary .key { border-color: color-mix(in srgb, var(--accent-ink) 40%, transparent); color: var(--accent-ink); }
 
+/* dom.js's field(): a labelled row in a dialog. This is the only thing
+   that carries the class, so it is what the class means. */
 .field {
-  flex: 1;
-  min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
-  gap: 8px;
-  background: var(--sunken);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  height: 25px;
-  padding: 0 8px;
 }
-.field:focus-within { border-color: var(--accent); background: var(--surface); }
-.field .lbl { font: 600 9.5px/1 var(--cond); letter-spacing: .1em; color: var(--accent); flex: none; }
-.field input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: none;
-  font: 400 12.5px/1 var(--mono);
-}
-.field input:focus { outline: none; }
-.field input::placeholder { color: var(--ink-3); }
+.field > label { color: var(--ink-2); }
+.field > input, .field > select, .field > textarea { width: 100%; font-family: var(--mono); font-size: 12.5px; }
+/* a checkbox should not stretch across the column it sits in */
+.field > input[type="checkbox"] { width: auto; justify-self: start; }
 
 .seg { display: flex; border: 1px solid var(--hair-2); border-radius: var(--radius); overflow: hidden; flex: none; height: 25px; }
 .seg button {
@@ -1253,17 +1273,6 @@ table.st td.narrow { width: 1%; white-space: nowrap; text-align: center; }
 .card .body { padding: 14px; display: grid; gap: 10px; }
 .card .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--hair); }
 
-.field-row { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px; align-items: center; }
-.field-row > label { color: var(--ink-2); }
-.field-row input[type=text], .field-row input[type=password], .field-row input[type=number], .field-row select {
-  background: var(--sunken);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 5px 8px;
-  color: var(--ink);
-  font: 400 12.5px/1 var(--mono);
-}
-.field-row input:focus, .field-row select:focus { outline: none; border-color: var(--accent); background: var(--surface); }
 .note { color: var(--ink-3); font-size: 11.5px; }
 .warn-text { color: var(--warn); }
 .err-text  { color: var(--crit); }
