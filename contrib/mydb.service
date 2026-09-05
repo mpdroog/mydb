@@ -1,0 +1,64 @@
+# mydb as a systemd --user service.
+#
+# It runs as you on purpose. mydb reads ~/.ssh/known_hosts and your private
+# keys, talks to the ssh-agent in your login session, and writes the
+# config-file back whenever you add or edit a server in the GUI. A system
+# daemon would have to be handed all of that; a user service already has it.
+#
+# Install (paths below assume the repo is at its Go import path under $HOME):
+#   ln -s $HOME/go/src/github.com/mpdroog/mydb/contrib/mydb.service \
+#         $HOME/.config/systemd/user/mydb.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mydb
+#
+# Checked out somewhere else? Replace the three %h paths below.
+# Want it running before you log in, and to survive a logout?
+#   loginctl enable-linger $USER
+# Safe here: every [server.ssh] authenticates with a key or a password, so
+# nothing depends on a login session existing.
+
+[Unit]
+Description=mydb, a MySQL GUI on localhost
+Documentation=https://github.com/mpdroog/mydb
+
+[Service]
+Type=exec
+WorkingDirectory=%h/go/src/github.com/mpdroog/mydb
+ExecStart=%h/go/src/github.com/mpdroog/mydb/mydb -c %h/go/src/github.com/mpdroog/mydb/config.toml.prod
+SyslogIdentifier=mydb
+
+Restart=on-failure
+RestartSec=2s
+
+# mydb handles SIGTERM itself: it closes the SSE streams, then gives
+# in-flight requests 5s. Leave it room to do that before the kill.
+TimeoutStopSec=20s
+
+# Everything is read-only, including the rest of $HOME; only the directory
+# mydb actually writes to (config.toml, the query log) is not. /tmp is
+# private because mydb never uses it -- but note that an ssh-agent socket
+# lives there, so if you ever set agent = true on a server, drop PrivateTmp
+# or the dial fails with "SSH_AUTH_SOCK is empty".
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/go/src/github.com/mpdroog/mydb
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# TCP to MySQL and the listener; AF_UNIX is what the resolver falls back
+# to for a name like adb-vip.xsnews.intern.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=default.target
