@@ -82,6 +82,16 @@ function form(entry, onSaved) {
   const name = h('input', { type: 'text', value: s.name, placeholder: 'prod-eu' });
   const host = h('input', { type: 'text', value: s.host, placeholder: '127.0.0.1' });
   const port = h('input', { type: 'number', value: s.port || 3306, min: 1, max: 65535 });
+  // A socket is an alternative address, not an extra one, so it is a mode
+  // rather than a field: host/port and the tunnel are meaningless while it
+  // is on, and a form that still showed them would be asking for a
+  // combination the server refuses.
+  const useSock = h('input', { type: 'checkbox', checked: !!s.socket });
+  const sock = h('input', {
+    type: 'text',
+    value: s.socket || '',
+    placeholder: '/run/mysqld/mysqld.sock',
+  });
   const user = h('input', { type: 'text', value: s.user || '' });
   const pass = h('input', {
     type: 'password',
@@ -137,15 +147,45 @@ function form(entry, onSaved) {
     }),
   );
   sshBox.hidden = !useSSH.checked;
-  useSSH.addEventListener('change', () => { sshBox.hidden = !useSSH.checked; });
+
+  const hostRow = field('MySQL host', host);
+  const portRow = field('Port', port);
+  const sockRow = field('Socket path', sock);
+  const tunnelRow = field('Via SSH tunnel', useSSH);
+  const hostNote = h('p', {
+    class: 'note',
+    text: 'With SSH on, the host is resolved from the SSH server (usually 127.0.0.1).',
+  });
+  const sockNote = h('p', {
+    class: 'note',
+    text: 'For a MySQL on this machine that listens on a socket instead of a port '
+      + '(skip-networking). No tunnel and no TLS: the connection never leaves the box.',
+  });
+
+  // One switch drives which half of the dialog is real.
+  const mode = () => {
+    const on = useSock.checked;
+    hostRow.hidden = on;
+    portRow.hidden = on;
+    hostNote.hidden = on;
+    sockRow.hidden = !on;
+    sockNote.hidden = !on;
+    tunnelRow.hidden = on;
+    sshBox.hidden = on || !useSSH.checked;
+  };
+  useSock.addEventListener('change', mode);
+  useSSH.addEventListener('change', mode);
 
   const body = h('div', {},
     field('Name', name),
-    field('MySQL host', host),
-    field('Port', port),
+    field('Unix socket', useSock),
+    hostRow,
+    portRow,
+    sockRow,
+    sockNote,
     field('MySQL user', user),
     field('MySQL password', pass),
-    h('p', { class: 'note', text: 'With SSH on, the host is resolved from the SSH server (usually 127.0.0.1).' }),
+    hostNote,
     field('Colour', hues),
     h('p', {
       class: 'note',
@@ -160,9 +200,10 @@ function form(entry, onSaved) {
         + 'statement that changes data without a WHERE asks you to type the '
         + 'server\'s name rather than click a button.',
     }),
-    field('Via SSH tunnel', useSSH),
+    tunnelRow,
     sshBox,
   );
+  mode();
 
   const save = h('button', { type: 'button', text: isNew ? 'Add' : 'Save' });
   const foot = [h('button', { type: 'button', text: 'Cancel', onclick: () => close() })];
@@ -187,15 +228,19 @@ function form(entry, onSaved) {
   const close = modal(isNew ? 'Add server' : 'Edit ' + s.name, body, foot);
 
   save.addEventListener('click', async () => {
+    const onSock = useSock.checked;
     const payload = {
       name: name.value.trim(),
-      host: host.value.trim(),
-      port: Number(port.value) || 3306,
+      // Exactly one address goes to the server. Sending the leftovers of
+      // the half that is hidden would be rejected, and rightly so.
+      host: onSock ? '' : host.value.trim(),
+      port: onSock ? 0 : Number(port.value) || 3306,
+      socket: onSock ? sock.value.trim() : '',
       user: user.value.trim(),
       pass: pass.value,
       colour,
       production: production.checked,
-      ssh: useSSH.checked ? {
+      ssh: !onSock && useSSH.checked ? {
         host: sshHost.value.trim(),
         user: sshUser.value.trim(),
         agent: sshAgent.checked,
@@ -204,7 +249,10 @@ function form(entry, onSaved) {
         pass: sshPass.value,
       } : null,
     };
-    if (!payload.name || !payload.host) { toast('Name and host are required', 'err'); return; }
+    if (!payload.name || !(payload.host || payload.socket)) {
+      toast(onSock ? 'Name and socket path are required' : 'Name and host are required', 'err');
+      return;
+    }
 
     save.disabled = true;
     try {

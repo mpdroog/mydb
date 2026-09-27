@@ -16,7 +16,8 @@ import (
 const maxOpenConns = 4
 
 // openPool builds the *sql.DB for one server on the given driver network,
-// which is "tcp" for direct servers and the per-server tunnel name otherwise.
+// which is "tcp" or "unix" for direct servers and the per-server tunnel
+// name otherwise.
 //
 // The settings below are deliberately the strict end of what the driver
 // offers. Three of them defend against a *server* rather than a query,

@@ -102,6 +102,31 @@ production = true      # red chrome, and destructive statements ask harder
   host  = "bastion.example.com:22"
   user  = "mp"
   agent = true         # or key = "~/.ssh/id_ed25519"
+
+[[server]]
+name   = "local"
+socket = "/run/mysqld/mysqld.sock"   # instead of host/port
+user   = "root"
+```
+
+A MySQL on this machine often listens on a socket and no port at all --
+Alpine's mariadb ships with `skip-networking`. Give that server a `socket`
+instead of a `host` and `port`. It is an alternative address, not an extra
+one: `socket` alongside `host`, `port`, `tls` or `[server.ssh]` is refused
+rather than half-ignored, because a socket connection never leaves the
+machine and there is nothing for a tunnel or a certificate to do.
+
+The account still needs a password. A distro's `root` is usually
+authenticated by the `unix_socket` plugin ("who are you on this machine?"),
+and the Go MySQL driver does not implement that plugin -- it speaks
+`mysql_native_password`, `caching_sha2_password`, `sha256_password` and
+`client_ed25519`. Reaching the socket is not the same as being let in:
+`ERROR 1698 (28000)` back from a socket server means the transport worked
+and the plugin did not. Make an account that has a password:
+
+```sql
+CREATE USER 'mydb'@'localhost' IDENTIFIED BY '…';
+GRANT ALL ON *.* TO 'mydb'@'localhost';
 ```
 
 Servers can also be added, edited and removed from the GUI, which rewrites

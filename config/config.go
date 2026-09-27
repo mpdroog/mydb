@@ -101,11 +101,20 @@ type Link struct {
 type Server struct {
 	SSH  *SSH   `toml:"ssh,omitempty"`
 	Name string `toml:"name"`
-	Host string `toml:"host"`
-	User string `toml:"user,omitempty"`
-	Pass string `toml:"pass,omitempty"`
-	TLS  string `toml:"tls,omitempty"`
-	Port int    `toml:"port,omitzero"`
+	Host string `toml:"host,omitempty"`
+	// Socket is the path of a MySQL unix socket, and the alternative to
+	// host/port rather than an addition to it. A server that has one is on
+	// this machine by definition: plenty of local installs (Alpine's
+	// mariadb, Debian's default) ship with skip-networking or bind only to
+	// a socket, and before this there was no way to reach them at all.
+	//
+	// It excludes host, port, tls and [server.ssh], all of which validate
+	// rejects rather than quietly ignores.
+	Socket string `toml:"socket,omitempty"`
+	User   string `toml:"user,omitempty"`
+	Pass   string `toml:"pass,omitempty"`
+	TLS    string `toml:"tls,omitempty"`
+	Port   int    `toml:"port,omitzero"`
 	// Colour is the server's identity hue, worn everywhere the server
 	// appears so two connections are never confused for each other. It is
 	// a name from ColourNames, not a CSS value: the GUI owns the actual
@@ -172,6 +181,13 @@ var TLSNames = map[string]bool{
 // issued for the real hostname rather than the 127.0.0.1 we dial through
 // the tunnel. Everything else defaults to opportunistic TLS.
 func (s Server) TLSMode() string {
+	// A unix socket never leaves the machine, so there is no transport to
+	// protect and no hostname to check a certificate against. Nothing is
+	// being ignored here: validate rejects a socket server that also sets
+	// tls, rather than letting this quietly overrule it.
+	if s.Socket != "" {
+		return "false"
+	}
 	if s.TLS != "" {
 		return s.TLS
 	}
@@ -181,13 +197,30 @@ func (s Server) TLSMode() string {
 	return "preferred"
 }
 
-// Addr returns the host:port to dial MySQL on.
+// Addr returns the address to dial MySQL on: the socket path for a server
+// that has one, host:port for everything else. Network says how to read it.
 func (s Server) Addr() string {
+	if s.Socket != "" {
+		return s.Socket
+	}
 	port := s.Port
 	if port == 0 {
 		port = 3306
 	}
 	return fmt.Sprintf("%s:%d", s.Host, port)
+}
+
+// Network is the driver network Addr is an address on.
+//
+// A tunnelled server does not use this: connman hands the driver the
+// per-server network name it registered the tunnel's dialler under, which
+// is what makes a "tcp" address resolve on the far side of the SSH
+// connection instead of here.
+func (s Server) Network() string {
+	if s.Socket != "" {
+		return "unix"
+	}
+	return "tcp"
 }
 
 // Timeout is the deadline-budget, every network operation draws from it.
@@ -378,8 +411,25 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config.validate: duplicate server name %q", s.Name)
 		}
 		seen[s.Name] = true
-		if s.Host == "" {
-			return fmt.Errorf("config.validate: server %q has no host", s.Name)
+		switch {
+		case s.Host == "" && s.Socket == "":
+			return fmt.Errorf("config.validate: server %q has neither host nor socket", s.Name)
+		case s.Host != "" && s.Socket != "":
+			return fmt.Errorf("config.validate: server %q has both host and socket, it can only be dialled one way", s.Name)
+		}
+		// The three things a socket cannot be combined with. Each of them
+		// would otherwise have to be silently dropped, and a config-file
+		// that does not mean what it says is worse than one that is refused.
+		if s.Socket != "" {
+			if s.SSH != nil {
+				return fmt.Errorf("config.validate: server %q has socket and [server.ssh], but a socket file is on this machine and a tunnel forwards tcp to another one", s.Name)
+			}
+			if s.Port != 0 {
+				return fmt.Errorf("config.validate: server %q has socket and port, a socket file has no port", s.Name)
+			}
+			if s.TLS != "" {
+				return fmt.Errorf("config.validate: server %q has socket and tls, a socket connection never leaves the machine", s.Name)
+			}
 		}
 		if s.SSH != nil && s.SSH.Host == "" {
 			return fmt.Errorf("config.validate: server %q has [server.ssh] without host", s.Name)

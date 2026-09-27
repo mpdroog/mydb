@@ -288,7 +288,10 @@ func (m *Manager) dial(ctx context.Context, c *conn) {
 func (m *Manager) open(ctx context.Context, c *conn, cfg config.Server, t config.Timeout) (*sshtun.Client, *sql.DB, error) {
 	var tun *sshtun.Client
 
-	network := "tcp"
+	// "tcp" or "unix", whichever the server's address is; a tunnelled
+	// server replaces it below with the network name its dialler is
+	// registered under.
+	network := cfg.Network()
 	if cfg.SSH != nil {
 		var e error
 		tun, e = sshtun.Dial(ctx, c.name, cfg.SSH, t)

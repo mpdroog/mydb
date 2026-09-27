@@ -66,6 +66,12 @@ func TestValidate(t *testing.T) {
 		{"no host", "[[server]]\nname = \"a\"\n"},
 		{"duplicate", "[[server]]\nname=\"a\"\nhost=\"h\"\n[[server]]\nname=\"a\"\nhost=\"h\"\n"},
 		{"ssh without host", "[[server]]\nname=\"a\"\nhost=\"h\"\n  [server.ssh]\n  user=\"mp\"\n"},
+		// A socket is an alternative address, so every way of asking for
+		// two at once is refused rather than resolved by precedence.
+		{"host and socket", "[[server]]\nname=\"a\"\nhost=\"h\"\nsocket=\"/run/mysqld/mysqld.sock\"\n"},
+		{"socket and port", "[[server]]\nname=\"a\"\nsocket=\"/run/mysqld/mysqld.sock\"\nport=3306\n"},
+		{"socket and tls", "[[server]]\nname=\"a\"\nsocket=\"/run/mysqld/mysqld.sock\"\ntls=\"preferred\"\n"},
+		{"socket and ssh", "[[server]]\nname=\"a\"\nsocket=\"/run/mysqld/mysqld.sock\"\n  [server.ssh]\n  host=\"bastion:22\"\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.toml")
@@ -321,5 +327,76 @@ func TestValidateRejectsAnUnknownColour(t *testing.T) {
 	c.Server[0].ColourName = "azure"
 	if e := c.validate(); e != nil {
 		t.Fatalf("validate rejected a good colour: %s", e)
+	}
+}
+
+// TestSocketServer covers the local-socket server end to end: it loads, it
+// dials on the right driver network, and it asks for no TLS. The last one
+// is not cosmetic -- "preferred" on a unix socket would have the driver
+// negotiate a TLS session with a server on the other side of a file.
+func TestSocketServer(t *testing.T) {
+	write(t, "[[server]]\nname=\"local\"\nsocket=\"/run/mysqld/mysqld.sock\"\nuser=\"root\"\n")
+
+	s, e := ServerByName("local")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got := s.Network(); got != "unix" {
+		t.Errorf("Network = %q, want unix", got)
+	}
+	if got := s.Addr(); got != "/run/mysqld/mysqld.sock" {
+		t.Errorf("Addr = %q, want the socket path", got)
+	}
+	if got := s.TLSMode(); got != "false" {
+		t.Errorf("TLSMode = %q, want false", got)
+	}
+}
+
+// TestSocketSurvivesSave checks that a socket server written back out is
+// still a socket server, and that no empty host or zero port rides along
+// with it: the GUI rewrites this file on every edit, and a host = "" left
+// in it would fail the next load with "both host and socket".
+func TestSocketSurvivesSave(t *testing.T) {
+	path := write(t, "")
+
+	if e := AddServer(Server{Name: "local", Socket: "/run/mysqld/mysqld.sock", User: "root"}); e != nil {
+		t.Fatal(e)
+	}
+	body, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(string(body), "host") || strings.Contains(string(body), "port") {
+		t.Errorf("a socket server was written with a host or port:\n%s", body)
+	}
+	if e := Open(path); e != nil {
+		t.Fatalf("reloading what we just wrote: %v", e)
+	}
+	s, e := ServerByName("local")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if s.Socket != "/run/mysqld/mysqld.sock" {
+		t.Errorf("socket = %q after a save round-trip", s.Socket)
+	}
+}
+
+// TestTCPServerIsUnchanged is the other half: adding a socket must not have
+// moved a plain tcp server, which is what every existing config-file holds.
+func TestTCPServerIsUnchanged(t *testing.T) {
+	write(t, "[[server]]\nname=\"one\"\nhost=\"10.0.0.5\"\n")
+
+	s, e := ServerByName("one")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got := s.Network(); got != "tcp" {
+		t.Errorf("Network = %q, want tcp", got)
+	}
+	if got := s.Addr(); got != "10.0.0.5:3306" {
+		t.Errorf("Addr = %q, want the default port filled in", got)
+	}
+	if got := s.TLSMode(); got != "preferred" {
+		t.Errorf("TLSMode = %q, want preferred", got)
 	}
 }

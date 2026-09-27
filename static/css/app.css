@@ -415,6 +415,9 @@ kbd, .key {
 .field > input, .field > select, .field > textarea { width: 100%; font-family: var(--mono); font-size: 12.5px; }
 /* a checkbox should not stretch across the column it sits in */
 .field > input[type="checkbox"] { width: auto; justify-self: start; }
+/* display: grid above outranks the browser's own [hidden] rule, so a row
+   switched off from JS would otherwise stay on screen. */
+.field[hidden] { display: none; }
 
 .seg { display: flex; border: 1px solid var(--hair-2); border-radius: var(--radius); overflow: hidden; flex: none; height: 25px; }
 .seg button {

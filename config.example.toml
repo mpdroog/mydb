@@ -60,6 +60,26 @@ pass = ""
 # Leave it out and mydb derives one from the server's name.
 #colour = "azure"
 
+# A MySQL on this machine that listens on a unix socket rather than a port.
+# Plenty of local installs are set up that way -- Alpine's mariadb ships with
+# skip-networking, so /run/mysqld/mysqld.sock is the only way in.
+#
+# socket replaces host and port, it does not accompany them: a config-file
+# with both, or with socket next to tls or [server.ssh], is refused rather
+# than half-ignored. There is nothing for TLS to protect and nothing for a
+# tunnel to reach -- the connection never leaves the machine.
+#
+# The account needs a password even so: a distro's root is usually
+# authenticated by the unix_socket plugin, which the Go MySQL driver does not
+# implement. "Access denied (1698)" from a socket server means the socket was
+# reached and the auth plugin was the problem, not the path.
+#
+#[[server]]
+#name = "local"
+#socket = "/run/mysqld/mysqld.sock"
+#user = "mydb"
+#pass = "hunter2"
+
 # A server behind a bastion. host/port are resolved on the SSH host, so
 # 127.0.0.1 here means "localhost as the bastion sees it".
 #

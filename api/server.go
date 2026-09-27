@@ -18,8 +18,12 @@ type serverView struct {
 	SSH  *sshView `json:"ssh,omitempty"`
 	Name string   `json:"name"`
 	Host string   `json:"host"`
-	User string   `json:"user"`
-	Port int      `json:"port"`
+	// Socket is the unix socket path for a server dialled over one, and
+	// empty for a server dialled over tcp. The two are alternatives, so
+	// the form reads this first and only falls back to host/port.
+	Socket string `json:"socket"`
+	User   string `json:"user"`
+	Port   int    `json:"port"`
 	// Colour is always populated, even when the config-file leaves it out:
 	// the GUI needs a hue to draw and should not have to guess the same way
 	// twice. Explicit says whether the operator chose it, which is what the
@@ -48,6 +52,7 @@ type serverInput struct {
 	SSH        *sshInput `json:"ssh"`
 	Name       string    `json:"name"`
 	Host       string    `json:"host"`
+	Socket     string    `json:"socket"`
 	User       string    `json:"user"`
 	Pass       string    `json:"pass"`
 	Port       int       `json:"port"`
@@ -70,6 +75,7 @@ func view(s config.Server) serverView {
 	v := serverView{
 		Name:       s.Name,
 		Host:       s.Host,
+		Socket:     s.Socket,
 		Port:       s.Port,
 		User:       s.User,
 		Colour:     s.Colour(),
@@ -96,6 +102,7 @@ func merge(in serverInput, old config.Server, isNew bool) config.Server {
 	s := config.Server{
 		Name:       in.Name,
 		Host:       in.Host,
+		Socket:     in.Socket,
 		Port:       in.Port,
 		User:       in.User,
 		Pass:       in.Pass,
@@ -106,8 +113,11 @@ func merge(in serverInput, old config.Server, isNew bool) config.Server {
 		s.Pass = old.Pass
 	}
 	// The form has no TLS field. Carrying it over keeps an edit from
-	// quietly dropping a per-server tls setting out of the config-file.
-	if !isNew {
+	// quietly dropping a per-server tls setting out of the config-file --
+	// except onto a socket, where tls is rejected rather than ignored, and
+	// carrying it would turn "switch this server to its socket" into a
+	// validation error about a setting the form never showed.
+	if !isNew && s.Socket == "" {
 		s.TLS = old.TLS
 	}
 	if in.SSH != nil {

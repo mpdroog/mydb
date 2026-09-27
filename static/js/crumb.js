@@ -11,8 +11,11 @@ import { classOf } from './colour.js';
 
 export function crumb(server, db, table) {
   const s = servers.get(server);
+  // Whichever address this one actually has: a socket server has no host,
+  // and "prod-eu" with nothing after it is a worse tooltip than the path.
+  const where = s?.socket || s?.host;
   const el = h('div', { class: 'crumb ' + classOf(s?.colour) },
-    h('span', { class: 'env', title: s?.host ? server + ' — ' + s.host : server },
+    h('span', { class: 'env', title: where ? server + ' — ' + where : server },
       h('span', { class: 'swatch' }), server || '—'));
 
   if (db) el.append(h('span', { class: 'sep', text: '/' }), h('span', { text: db }));
